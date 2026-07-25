@@ -84,7 +84,7 @@ function Avatar({ name, size = 40 }) {
 }
 
 /* ------------------------------- Главная ------------------------------- */
-function HomeTab({ student, announcement }) {
+function HomeTab({ student, notifications = [] }) {
   const log = [...(student.attendanceLog || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   const total = log.length;
   const present = log.filter((r) => r.present).length;
@@ -93,13 +93,36 @@ function HomeTab({ student, announcement }) {
   const materials = [...(student.materials || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
   const hasDebt = (student.debt || 0) > 0;
+  const urgentNotifications = notifications.filter((n) => n.urgent);
+  const normalNotifications = notifications.filter((n) => !n.urgent);
 
   return (
     <div className="space-y-3">
-      {announcement && (
-        <div className="rounded-3xl p-4 flex items-start gap-2.5" style={{ background: "linear-gradient(135deg, #FEF9C3, #FEE2E2)", border: "1px solid #FDE68A" }}>
-          <Megaphone size={18} className="shrink-0 mt-0.5" style={{ color: "#B45309" }} />
-          <p className="text-[13px] font-medium leading-snug" style={{ color: "#854D0E" }}>{announcement}</p>
+      {urgentNotifications.map((n) => (
+        <div key={n.id} className="rounded-3xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})`, boxShadow: "0 4px 20px rgba(220,38,38,0.35)" }}>
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(255,255,255,0.2)" }}>
+              <Megaphone size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-wide opacity-90">Важное уведомление</p>
+              <p className="text-[15px] font-semibold leading-snug mt-1">{n.text}</p>
+              <p className="text-[11px] opacity-75 mt-1.5">{n.senderName} · {ruDate(n.date)}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+      {normalNotifications.length > 0 && (
+        <div className="rounded-3xl p-4 space-y-2.5" style={{ background: "linear-gradient(135deg, #FEF9C3, #FEE2E2)", border: "1px solid #FDE68A" }}>
+          {normalNotifications.map((n) => (
+            <div key={n.id} className="flex items-start gap-2.5">
+              <Megaphone size={18} className="shrink-0 mt-0.5" style={{ color: "#B45309" }} />
+              <div className="min-w-0">
+                <p className="text-[13px] font-medium leading-snug" style={{ color: "#854D0E" }}>{n.text}</p>
+                <p className="text-[10.5px] opacity-60 mt-0.5" style={{ color: "#854D0E" }}>{n.senderName} · {ruDate(n.date)}</p>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -243,8 +266,11 @@ function RatingTab({ student }) {
                 <Avatar name={m.name} size={36} />
                 <div className="flex-1 min-w-0">
                   <div className="text-[13.5px] font-semibold truncate" style={{ color: isMe ? RED_D : INK }}>{m.name}{isMe && " (вы)"}</div>
+                  {m.avgGrade !== null && m.avgGrade !== undefined && (
+                    <div className="text-[11px] opacity-50 mt-0.5">Средний балл: {m.avgGrade}</div>
+                  )}
                 </div>
-                <div className="text-[13.5px] font-bold px-2.5 py-1 rounded-full shrink-0" style={{ background: "#FEF9C3", color: "#854D0E" }}>{m.coins} GC</div>
+                <div className="text-[13.5px] font-bold px-2.5 py-1 rounded-full shrink-0 flex items-center gap-1" style={{ background: "#FEF9C3", color: "#854D0E" }}><CoinsIcon size={12} />{m.coins} GC</div>
               </div>
             );
           })}
@@ -258,6 +284,7 @@ function RatingTab({ student }) {
 function ShopTab({ student, shopItems, onRedeem, redeeming }) {
   const [confirmId, setConfirmId] = useState(null);
   const sorted = [...shopItems].sort((a, b) => (student.coins >= a.cost) === (student.coins >= b.cost) ? a.cost - b.cost : (student.coins >= a.cost ? -1 : 1));
+  const orders = [...(student.myOrders || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   return (
     <div className="space-y-3">
       <div className="rounded-3xl p-5 text-white flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
@@ -297,13 +324,13 @@ function ShopTab({ student, shopItems, onRedeem, redeeming }) {
                       <button
                         onClick={() => { onRedeem(item.id); setConfirmId(null); }}
                         disabled={redeeming}
-                        className="w-full mt-2 text-[11px] font-bold py-2 rounded-xl text-white"
+                        className="w-full mt-2.5 text-[12.5px] font-bold py-3 rounded-xl text-white active:scale-95 transition-transform"
                         style={{ background: RED_D, opacity: redeeming ? 0.6 : 1 }}
                       >
                         {redeeming ? "…" : "Точно купить?"}
                       </button>
                     ) : (
-                      <button onClick={() => setConfirmId(item.id)} className="w-full mt-2 text-[11px] font-bold py-2 rounded-xl text-white" style={{ background: RED }}>
+                      <button onClick={() => setConfirmId(item.id)} className="w-full mt-2.5 text-[12.5px] font-bold py-3 rounded-xl text-white active:scale-95 transition-transform" style={{ background: RED }}>
                         Купить
                       </button>
                     )
@@ -315,6 +342,27 @@ function ShopTab({ student, shopItems, onRedeem, redeeming }) {
         </div>
       )}
       <p className="text-[11px] opacity-40 text-center px-4">После покупки заявка сразу видна администратору и директору — просто дождитесь, когда вам выдадут награду.</p>
+
+      {orders.length > 0 && (
+        <Card className="p-4">
+          <h3 className="text-[14px] font-bold mb-2.5 flex items-center gap-1.5"><ShoppingBag size={16} />Мои заказы</h3>
+          <div className="space-y-1.5">
+            {orders.map((o) => (
+              <div key={o.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl" style={{ background: PAPER }}>
+                <div className="min-w-0">
+                  <div className="text-[12.5px] font-medium truncate">{o.itemName}</div>
+                  <div className="text-[10.5px] opacity-45 mt-0.5">{ruDate(o.date)} · {o.cost} GC</div>
+                </div>
+                {o.status === "fulfilled" ? (
+                  <span className="shrink-0 text-[10.5px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ background: "#DCFCE7", color: GREEN_D }}><CheckCircle2 size={11} />Выдано</span>
+                ) : (
+                  <span className="shrink-0 text-[10.5px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ background: "#FEF9C3", color: "#854D0E" }}><Clock size={11} />В очереди</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
@@ -406,7 +454,6 @@ export default function ParentApp() {
   const [errorMsg, setErrorMsg] = useState("");
   const [students, setStudents] = useState([]);
   const [shopItems, setShopItems] = useState([]);
-  const [announcement, setAnnouncement] = useState("");
   const [activeId, setActiveId] = useState(null);
   const [initData, setInitData] = useState("");
   const [phone, setPhone] = useState("");
@@ -432,7 +479,6 @@ export default function ParentApp() {
       }
       setStudents(data.students);
       setShopItems(data.shopItems || []);
-      setAnnouncement(data.announcement || "");
       setActiveId(data.students[0]?.id || null);
       setPhase("ready");
       if (phoneVal && passwordVal) {
@@ -453,7 +499,6 @@ export default function ParentApp() {
       if (!data.error && data.linked) {
         setStudents(data.students);
         setShopItems(data.shopItems || []);
-        setAnnouncement(data.announcement || "");
       }
     } finally {
       setRefreshing(false);
@@ -476,7 +521,6 @@ export default function ParentApp() {
       if (first.linked) {
         setStudents(first.students);
         setShopItems(first.shopItems || []);
-        setAnnouncement(first.announcement || "");
         setActiveId(first.students[0]?.id || null);
         setPhase("ready");
         return;
@@ -525,8 +569,9 @@ export default function ParentApp() {
     if (!student) return;
     setRedeeming(true);
     try {
-      const data = await fetchMyData(initData, null, null, itemId, student.id);
+      const data = await fetchMyData(initData, phone.trim() || null, password.trim() || null, itemId, student.id);
       if (data.error) { setToast(data.error); setTimeout(() => setToast(""), 3000); return; }
+      if (!data.linked) { setToast("Не удалось подтвердить личность — откройте приложение заново и попробуйте снова."); setTimeout(() => setToast(""), 4000); return; }
       if (data.redeemed) {
         setStudents(data.students);
         setToast("Заявка отправлена! Дождитесь выдачи у администратора.");
@@ -586,7 +631,7 @@ export default function ParentApp() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={silentRefresh} disabled={refreshing} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#fff", border: `1px solid ${LINE}` }} title="Обновить">
+          <button onClick={silentRefresh} disabled={refreshing} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={{ background: "#fff", border: `1px solid ${LINE}` }} title="Обновить">
             <RefreshCw size={15} style={{ animation: refreshing ? "spin 0.7s linear infinite" : "none" }} />
           </button>
           {students.length > 1 && (
@@ -601,7 +646,7 @@ export default function ParentApp() {
         <div className="px-4"><EmptyState text="Ученик не найден" /></div>
       ) : (
         <div className="px-4">
-          {tab === "home" && <HomeTab student={student} announcement={announcement} />}
+          {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} />}
           {tab === "rating" && <RatingTab student={student} />}
           {tab === "shop" && <ShopTab student={student} shopItems={shopItems} onRedeem={handleRedeem} redeeming={redeeming} />}
           {tab === "profile" && <ProfileTab student={student} onLogout={handleLogout} />}
@@ -614,7 +659,7 @@ export default function ParentApp() {
           {TABS.map((t) => {
             const active = tab === t.key;
             return (
-              <button key={t.key} onClick={() => setTab(t.key)} className="flex-1 flex flex-col items-center gap-0.5 py-2 rounded-2xl transition-colors" style={{ background: active ? RED_L : "transparent" }}>
+              <button key={t.key} onClick={() => setTab(t.key)} className="flex-1 flex flex-col items-center gap-1 py-3 rounded-2xl transition-colors active:scale-95" style={{ background: active ? RED_L : "transparent" }}>
                 <t.icon size={18} style={{ color: active ? RED_D : "#9C9A90", opacity: active ? 1 : 0.7 }} />
                 <span className="text-[10px] font-semibold" style={{ color: active ? RED_D : "#9C9A90" }}>{t.label}</span>
               </button>
