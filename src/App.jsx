@@ -1,4 +1,9 @@
 import React, { useState, useEffect } from "react";
+import {
+  Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
+  FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
+  Award, Medal, TrendingUp, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone,
+} from "lucide-react";
 
 /* ------------------------------ Настройка ------------------------------ */
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
@@ -58,10 +63,10 @@ async function fetchMyData(initData, phone, password, redeemItemId, redeemStuden
 function Card({ children, className = "", style = {} }) {
   return <div className={`bg-white rounded-3xl ${className}`} style={{ boxShadow: "0 1px 3px rgba(26,26,23,0.06), 0 1px 2px rgba(26,26,23,0.04)", ...style }}>{children}</div>;
 }
-function EmptyState({ text, emoji = "🗂️" }) {
+function EmptyState({ text, icon: Icon = FileText }) {
   return (
     <div className="py-8 text-center">
-      <div className="text-[28px] mb-1.5">{emoji}</div>
+      <Icon size={26} className="mx-auto mb-2 opacity-25" />
       <p className="text-[12.5px] opacity-45">{text}</p>
     </div>
   );
@@ -93,23 +98,41 @@ function HomeTab({ student, announcement }) {
     <div className="space-y-3">
       {announcement && (
         <div className="rounded-3xl p-4 flex items-start gap-2.5" style={{ background: "linear-gradient(135deg, #FEF9C3, #FEE2E2)", border: "1px solid #FDE68A" }}>
-          <span className="text-[20px] leading-none">📣</span>
+          <Megaphone size={18} className="shrink-0 mt-0.5" style={{ color: "#B45309" }} />
           <p className="text-[13px] font-medium leading-snug" style={{ color: "#854D0E" }}>{announcement}</p>
         </div>
       )}
 
-      {/* Долг ИЛИ баланс — сверху то, что важнее сейчас */}
-      {hasDebt ? (
+      {/* Баланс и GlobalCoins — рядом, в отдельных рамках */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-3xl p-4 text-white relative overflow-hidden" style={{ background: hasDebt ? `linear-gradient(135deg, ${RED}, ${RED_D})` : `linear-gradient(135deg, ${GREEN}, ${GREEN_D})` }}>
+          <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
+          <Wallet size={19} className="opacity-90" />
+          <p className="text-[10.5px] font-medium opacity-85 uppercase tracking-wide mt-2">{hasDebt ? "Долг" : "Баланс"}</p>
+          {hasDebt ? (
+            <div className="text-[16px] font-extrabold mt-0.5 leading-tight">{fmt(student.debt)}<span className="text-[10.5px] font-medium opacity-80 ml-1">сум</span></div>
+          ) : (
+            <div className="flex items-center gap-1 mt-1.5 text-[12px] font-semibold"><CheckCircle2 size={14} /> Долгов нет</div>
+          )}
+        </div>
+        <div className="rounded-3xl p-4 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${GOLD}, #B45309)` }}>
+          <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
+          <CoinsIcon size={19} className="opacity-90" />
+          <p className="text-[10.5px] font-medium opacity-85 uppercase tracking-wide mt-2">GlobalCoins</p>
+          <div className="text-[16px] font-extrabold mt-0.5 leading-tight">{student.coins}<span className="text-[10.5px] font-medium opacity-80 ml-1">GC</span></div>
+        </div>
+      </div>
+
+      {hasDebt && (
         <Card className="p-4" style={{ border: `1.5px solid ${RED_L}` }}>
-          <div className="flex items-center justify-between">
-            <h3 className="text-[14.5px] font-bold">💳 Долг за обучение</h3>
-            <span className="text-[19px] font-extrabold" style={{ color: RED_D }}>{fmt(student.debt)} <span className="text-[12px] font-medium opacity-60">сум</span></span>
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="text-[13.5px] font-bold flex items-center gap-1.5"><Wallet size={15} style={{ color: RED_D }} /> Разбивка по месяцам</h3>
           </div>
           {student.discount > 0 && (
-            <div className="text-[11.5px] font-semibold mt-2 px-2.5 py-1 rounded-full inline-block" style={{ background: "#FEF9C3", color: "#854D0E" }}>🎉 Скидка −{student.discount}%</div>
+            <div className="text-[11.5px] font-semibold mt-1 mb-2 px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: "#FEF9C3", color: "#854D0E" }}><PartyPopper size={12} /> Скидка −{student.discount}%</div>
           )}
           {(student.monthlyDebts || []).length > 0 && (
-            <div className="mt-3 space-y-1.5">
+            <div className="mt-2 space-y-1.5">
               {[...student.monthlyDebts].sort((a, b) => a.month.localeCompare(b.month)).map((md) => (
                 <div key={md.month} className="flex items-center justify-between text-[12.5px] px-3 py-2 rounded-xl" style={{ background: PAPER }}>
                   <span className="capitalize">{new Date(md.month + "-01").toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}</span>
@@ -119,15 +142,6 @@ function HomeTab({ student, announcement }) {
             </div>
           )}
         </Card>
-      ) : (
-        <div className="rounded-3xl p-5 text-white flex items-center justify-between" style={{ background: "linear-gradient(135deg, #EAB308, #B45309)" }}>
-          <div>
-            <p className="text-[11px] font-medium opacity-85 uppercase tracking-wide">Баланс GlobalCoins</p>
-            <h2 className="text-[26px] font-extrabold mt-0.5">{student.coins} <span className="text-[15px] font-semibold opacity-90">GC</span></h2>
-            <p className="text-[11.5px] mt-1 opacity-90">✅ Долгов нет</p>
-          </div>
-          <div className="text-[34px]">🪙</div>
-        </div>
       )}
 
       {/* Расписание — плашка градиентом */}
@@ -139,8 +153,8 @@ function HomeTab({ student, announcement }) {
             <p className="text-[11px] font-medium opacity-80 uppercase tracking-wide">{student.group.course}</p>
             <h2 className="text-[19px] font-bold mt-0.5">{student.group.name}</h2>
             <div className="flex items-center gap-3 mt-3 text-[12.5px]">
-              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}>📅 {scheduleText(student.group)}</span>
-              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}>📍 {student.group.room}</span>
+              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}><Calendar size={12} className="inline mr-1 -mt-0.5" />{scheduleText(student.group)}</span>
+              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}><MapPin size={12} className="inline mr-1 -mt-0.5" />{student.group.room}</span>
             </div>
             {student.teacherName && <p className="text-[12px] mt-2 opacity-90">Преподаватель: {student.teacherName}</p>}
           </>
@@ -160,13 +174,13 @@ function HomeTab({ student, announcement }) {
           )}
         </div>
         {recent.length === 0 ? (
-          <EmptyState text="Пока нет отметок посещаемости" emoji="📋" />
+          <EmptyState text="Пока нет отметок посещаемости" icon={FileText} />
         ) : (
           <div className="flex gap-2 overflow-x-auto pb-1">
             {recent.map((r, i) => (
               <div key={i} className="shrink-0 w-16 rounded-2xl p-2 text-center" style={{ background: r.present ? "#F0FDF4" : r.excused ? "#EFF6FF" : "#FFF7ED" }}>
                 <div className="text-[10px] font-medium opacity-50 mono">{ruDate(r.date)}</div>
-                <div className="text-[16px] my-1">{r.present ? "✅" : r.excused ? "🔵" : "❌"}</div>
+                <div className="text-[16px] my-1">{r.present ? <CheckCircle2 size={16} style={{ color: GREEN_D, display: "inline" }} /> : r.excused ? <Clock size={16} style={{ color: BLUE, display: "inline" }} /> : <XCircle size={16} style={{ color: BRICK, display: "inline" }} />}</div>
                 {r.grade ? (
                   <div className="text-[11px] font-bold text-white rounded-full px-1.5 py-0.5 inline-block" style={{ background: gradeColors[r.grade] }}>{r.grade}</div>
                 ) : (
@@ -180,16 +194,16 @@ function HomeTab({ student, announcement }) {
 
       {/* ДЗ / материалы */}
       <Card className="p-4">
-        <h3 className="text-[14.5px] font-bold mb-3">📝 Домашнее задание</h3>
+        <h3 className="text-[14.5px] font-bold mb-3 flex items-center gap-1.5"><FileText size={16} />Домашнее задание</h3>
         {materials.length === 0 ? (
-          <EmptyState text="Пока нет домашних заданий" emoji="📝" />
+          <EmptyState text="Пока нет домашних заданий" icon={FileText} />
         ) : (
           <div className="space-y-2">
             {materials.map((m) => (
               <div key={m.id} className="p-3 rounded-2xl" style={{ background: "#FFFBEB", border: "1px solid #FEF3C7" }}>
                 <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#B45309" }}>{new Date(m.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "long" })}</div>
                 {m.text && <div className="text-[13px] mt-1 leading-snug">{m.text}</div>}
-                {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-medium flex items-center gap-1" style={{ color: BLUE }}>🔗 Открыть материал</a>}
+                {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-medium flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} className="inline mr-1 -mt-0.5" />Открыть материал</a>}
               </div>
             ))}
           </div>
@@ -202,17 +216,17 @@ function HomeTab({ student, announcement }) {
 /* ------------------------------- Рейтинг ------------------------------- */
 function RatingTab({ student }) {
   const groupmates = student.groupmates || [];
-  if (!student.group) return <EmptyState text="Рейтинг появится, когда закрепят группу" emoji="🏆" />;
+  if (!student.group) return <EmptyState text="Рейтинг появится, когда закрепят группу" icon={Trophy} />;
   const podiumBg = ["linear-gradient(135deg,#FCD34D,#F59E0B)", "linear-gradient(135deg,#D1D5DB,#9CA3AF)", "linear-gradient(135deg,#FCA5A5,#EA580C)"];
   return (
     <div className="space-y-3">
       <div className="rounded-3xl p-5 text-white text-center" style={{ background: `linear-gradient(135deg, ${GOLD}, #B45309)` }}>
-        <div className="text-[26px]">🏆</div>
+        <Trophy size={26} className="mx-auto" />
         <h2 className="text-[16px] font-bold mt-1">Рейтинг группы</h2>
         <p className="text-[12px] opacity-85 mt-0.5">{student.group.name} · по GlobalCoins</p>
       </div>
       {groupmates.length === 0 ? (
-        <EmptyState text="В группе пока никого нет" emoji="👥" />
+        <EmptyState text="В группе пока никого нет" icon={GraduationCap} />
       ) : (
         <Card className="p-2">
           {groupmates.map((m, i) => {
@@ -251,10 +265,10 @@ function ShopTab({ student, shopItems, onRedeem, redeeming }) {
           <p className="text-[11px] font-medium opacity-80 uppercase tracking-wide">Ваш баланс</p>
           <h2 className="text-[26px] font-extrabold mt-0.5">{student.coins} <span className="text-[15px] font-semibold opacity-90">GC</span></h2>
         </div>
-        <div className="text-[34px]">🪙</div>
+        <CoinsIcon size={30} className="opacity-90" />
       </div>
       {shopItems.length === 0 ? (
-        <EmptyState text="Магазин пока пуст" emoji="🛍️" />
+        <EmptyState text="Магазин пока пуст" icon={ShoppingBag} />
       ) : (
         <div className="grid grid-cols-2 gap-3">
           {sorted.map((item, i) => {
@@ -269,7 +283,7 @@ function ShopTab({ student, shopItems, onRedeem, redeeming }) {
                   {item.image ? (
                     <img src={item.image} alt="" className="w-full h-full object-cover" onError={(e) => { e.target.style.display = "none"; }} />
                   ) : (
-                    <span className="text-[36px]">🎁</span>
+                    <Gift size={32} style={{ opacity: 0.55 }} />
                   )}
                 </div>
                 <div className="p-2.5">
@@ -314,7 +328,7 @@ function ProfileTab({ student, onLogout }) {
         <h2 className="text-[17px] font-bold mt-3">{student.name}</h2>
         {student.phone && <p className="text-[13px] opacity-50 mt-0.5">{student.phone}</p>}
         <div className="flex items-center justify-center gap-2 mt-3">
-          <span className="text-[13px] font-bold px-3 py-1.5 rounded-full" style={{ background: "#FEF9C3", color: "#854D0E" }}>🪙 {student.coins} GC</span>
+          <span className="text-[13px] font-bold px-3 py-1.5 rounded-full" style={{ background: "#FEF9C3", color: "#854D0E" }}><CoinsIcon size={13} className="inline mr-1 -mt-0.5" />{student.coins} GC</span>
           {student.discount > 0 && <span className="text-[13px] font-bold px-3 py-1.5 rounded-full" style={{ background: "#DCFCE7", color: GREEN_D }}>−{student.discount}%</span>}
         </div>
       </Card>
@@ -340,7 +354,7 @@ function ProfileTab({ student, onLogout }) {
           </div>
         </Card>
       )}
-      <button onClick={onLogout} className="w-full text-[13px] font-medium py-3 rounded-2xl" style={{ background: "#F3F1EA", color: "#6B6A60" }}>Выйти из аккаунта</button>
+      <button onClick={onLogout} className="w-full text-[13px] font-medium py-3 rounded-2xl flex items-center justify-center gap-1.5" style={{ background: "#F3F1EA", color: "#6B6A60" }}><LogOut size={14} />Выйти из аккаунта</button>
     </div>
   );
 }
@@ -381,10 +395,10 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
 
 /* ----------------------------------- App ----------------------------------- */
 const TABS = [
-  { key: "home", label: "Главная", icon: "🏠" },
-  { key: "rating", label: "Рейтинг", icon: "🏆" },
-  { key: "shop", label: "Магазин", icon: "🛍️" },
-  { key: "profile", label: "Профиль", icon: "👤" },
+  { key: "home", label: "Главная", icon: Home },
+  { key: "rating", label: "Рейтинг", icon: Trophy },
+  { key: "shop", label: "Магазин", icon: ShoppingBag },
+  { key: "profile", label: "Профиль", icon: User },
 ];
 
 export default function ParentApp() {
@@ -541,7 +555,7 @@ export default function ParentApp() {
       <div style={{ background: PAPER }} className="min-h-screen flex items-center justify-center p-4">
         <style>{FONT_IMPORT}</style>
         <div className="max-w-sm text-center">
-          <div className="text-[32px] mb-2">⚠️</div>
+          <XCircle size={30} className="mx-auto mb-2" style={{ color: BRICK }} />
           <p className="text-[14px] font-bold mb-1.5">Не удалось загрузить данные</p>
           <p className="text-[12.5px] opacity-55 break-words">{errorMsg}</p>
         </div>
@@ -573,7 +587,7 @@ export default function ParentApp() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={silentRefresh} disabled={refreshing} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#fff", border: `1px solid ${LINE}` }} title="Обновить">
-            <span style={{ display: "inline-block", fontSize: 15, animation: refreshing ? "spin 0.7s linear infinite" : "none" }}>🔄</span>
+            <RefreshCw size={15} style={{ animation: refreshing ? "spin 0.7s linear infinite" : "none" }} />
           </button>
           {students.length > 1 && (
             <select value={activeId} onChange={(e) => setActiveId(e.target.value)} className="text-[12px] font-medium px-2.5 py-1.5 rounded-full outline-none" style={{ background: "#fff", border: `1px solid ${LINE}` }}>
@@ -601,7 +615,7 @@ export default function ParentApp() {
             const active = tab === t.key;
             return (
               <button key={t.key} onClick={() => setTab(t.key)} className="flex-1 flex flex-col items-center gap-0.5 py-2 rounded-2xl transition-colors" style={{ background: active ? RED_L : "transparent" }}>
-                <span className="text-[18px]" style={{ filter: active ? "none" : "grayscale(0.4) opacity(0.6)" }}>{t.icon}</span>
+                <t.icon size={18} style={{ color: active ? RED_D : "#9C9A90", opacity: active ? 1 : 0.7 }} />
                 <span className="text-[10px] font-semibold" style={{ color: active ? RED_D : "#9C9A90" }}>{t.label}</span>
               </button>
             );
