@@ -30,12 +30,22 @@ const ruDate = (iso) => new Date(iso).toLocaleDateString("ru-RU", { day: "2-digi
 const scheduleText = (g) => (g?.days && g.days.length ? `${g.days.join("/")} · ${g.start}–${g.end}` : "не задано");
 
 async function fetchMyData(initData, phone, password) {
-  const res = await fetch(EDGE_FUNCTION_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
-    body: JSON.stringify({ initData, phone, password }),
-  });
-  return res.json();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(EDGE_FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+      body: JSON.stringify({ initData, phone, password }),
+      signal: controller.signal,
+    });
+    return await res.json();
+  } catch (e) {
+    if (e.name === "AbortError") return { error: "Сервер не ответил вовремя — проверьте интернет-соединение и попробуйте ещё раз." };
+    return { error: "Нет связи с сервером: " + String(e?.message || e) };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /* -------------------------------- UI-атомы -------------------------------- */
@@ -247,8 +257,11 @@ export default function ParentApp() {
     if (!phone.trim() || !password.trim()) return;
     setLoginError("");
     setLoginLoading(true);
-    await loadWithCreds(initData, phone.trim(), password.trim());
-    setLoginLoading(false);
+    try {
+      await loadWithCreds(initData, phone.trim(), password.trim());
+    } finally {
+      setLoginLoading(false);
+    }
   };
 
   const student = students.find((s) => s.id === activeId);
