@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 /* ------------------------------ Настройка ------------------------------ */
 // Тот же проект Supabase, что и у остальных сайтов центра.
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
-const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_0U2ph4W4"; // тот же публичный ключ, что в остальных сайтах
+const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4"; // тот же публичный ключ, что в остальных сайтах
 
 /* ------------------------------ Стиль/тема ------------------------------ */
 const INK = "#1A1A17";
