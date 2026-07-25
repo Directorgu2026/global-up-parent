@@ -37,7 +37,7 @@ const initials = (name) => (name || "?").trim().split(/\s+/).slice(0, 2).map((w)
 
 async function fetchMyData(initData, phone, password, redeemItemId, redeemStudentId) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+  const timeout = setTimeout(() => controller.abort(), 20000);
   try {
     const res = await fetch(EDGE_FUNCTION_URL, {
       method: "POST",
@@ -79,7 +79,7 @@ function Avatar({ name, size = 40 }) {
 }
 
 /* ------------------------------- Главная ------------------------------- */
-function HomeTab({ student }) {
+function HomeTab({ student, announcement }) {
   const log = [...(student.attendanceLog || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   const total = log.length;
   const present = log.filter((r) => r.present).length;
@@ -87,9 +87,49 @@ function HomeTab({ student }) {
   const recent = log.slice(0, 8);
   const materials = [...(student.materials || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
+  const hasDebt = (student.debt || 0) > 0;
 
   return (
     <div className="space-y-3">
+      {announcement && (
+        <div className="rounded-3xl p-4 flex items-start gap-2.5" style={{ background: "linear-gradient(135deg, #FEF9C3, #FEE2E2)", border: "1px solid #FDE68A" }}>
+          <span className="text-[20px] leading-none">📣</span>
+          <p className="text-[13px] font-medium leading-snug" style={{ color: "#854D0E" }}>{announcement}</p>
+        </div>
+      )}
+
+      {/* Долг ИЛИ баланс — сверху то, что важнее сейчас */}
+      {hasDebt ? (
+        <Card className="p-4" style={{ border: `1.5px solid ${RED_L}` }}>
+          <div className="flex items-center justify-between">
+            <h3 className="text-[14.5px] font-bold">💳 Долг за обучение</h3>
+            <span className="text-[19px] font-extrabold" style={{ color: RED_D }}>{fmt(student.debt)} <span className="text-[12px] font-medium opacity-60">сум</span></span>
+          </div>
+          {student.discount > 0 && (
+            <div className="text-[11.5px] font-semibold mt-2 px-2.5 py-1 rounded-full inline-block" style={{ background: "#FEF9C3", color: "#854D0E" }}>🎉 Скидка −{student.discount}%</div>
+          )}
+          {(student.monthlyDebts || []).length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {[...student.monthlyDebts].sort((a, b) => a.month.localeCompare(b.month)).map((md) => (
+                <div key={md.month} className="flex items-center justify-between text-[12.5px] px-3 py-2 rounded-xl" style={{ background: PAPER }}>
+                  <span className="capitalize">{new Date(md.month + "-01").toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}</span>
+                  <span className="font-semibold">{fmt(md.amount)} сум</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      ) : (
+        <div className="rounded-3xl p-5 text-white flex items-center justify-between" style={{ background: "linear-gradient(135deg, #EAB308, #B45309)" }}>
+          <div>
+            <p className="text-[11px] font-medium opacity-85 uppercase tracking-wide">Баланс GlobalCoins</p>
+            <h2 className="text-[26px] font-extrabold mt-0.5">{student.coins} <span className="text-[15px] font-semibold opacity-90">GC</span></h2>
+            <p className="text-[11.5px] mt-1 opacity-90">✅ Долгов нет</p>
+          </div>
+          <div className="text-[34px]">🪙</div>
+        </div>
+      )}
+
       {/* Расписание — плашка градиентом */}
       <div className="rounded-3xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
         <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
@@ -150,27 +190,6 @@ function HomeTab({ student }) {
                 <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#B45309" }}>{new Date(m.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "long" })}</div>
                 {m.text && <div className="text-[13px] mt-1 leading-snug">{m.text}</div>}
                 {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-medium flex items-center gap-1" style={{ color: BLUE }}>🔗 Открыть материал</a>}
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* Долг — компактно */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-[14.5px] font-bold">💳 Долг за обучение</h3>
-          <span className="text-[17px] font-extrabold" style={{ color: student.debt > 0 ? RED_D : GREEN_D }}>{fmt(student.debt)} <span className="text-[12px] font-medium opacity-60">сум</span></span>
-        </div>
-        {student.discount > 0 && (
-          <div className="text-[11.5px] font-semibold mt-2 px-2.5 py-1 rounded-full inline-block" style={{ background: "#FEF9C3", color: "#854D0E" }}>🎉 Скидка −{student.discount}%</div>
-        )}
-        {(student.monthlyDebts || []).length > 0 && (
-          <div className="mt-3 space-y-1.5">
-            {[...student.monthlyDebts].sort((a, b) => a.month.localeCompare(b.month)).map((md) => (
-              <div key={md.month} className="flex items-center justify-between text-[12.5px] px-3 py-2 rounded-xl" style={{ background: PAPER }}>
-                <span className="capitalize">{new Date(md.month + "-01").toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}</span>
-                <span className="font-semibold">{fmt(md.amount)} сум</span>
               </div>
             ))}
           </div>
@@ -373,6 +392,7 @@ export default function ParentApp() {
   const [errorMsg, setErrorMsg] = useState("");
   const [students, setStudents] = useState([]);
   const [shopItems, setShopItems] = useState([]);
+  const [announcement, setAnnouncement] = useState("");
   const [activeId, setActiveId] = useState(null);
   const [initData, setInitData] = useState("");
   const [phone, setPhone] = useState("");
@@ -398,11 +418,31 @@ export default function ParentApp() {
       }
       setStudents(data.students);
       setShopItems(data.shopItems || []);
+      setAnnouncement(data.announcement || "");
       setActiveId(data.students[0]?.id || null);
       setPhase("ready");
+      if (phoneVal && passwordVal) {
+        try { localStorage.setItem("gu_phone", phoneVal); localStorage.setItem("gu_password", passwordVal); } catch {}
+      }
     } catch (e) {
       setErrorMsg(String(e?.message || e));
       setPhase("error");
+    }
+  };
+
+  const [refreshing, setRefreshing] = useState(false);
+  const silentRefresh = async () => {
+    if (phase !== "ready") return;
+    setRefreshing(true);
+    try {
+      const data = await fetchMyData(initData, phone.trim() || null, password.trim() || null);
+      if (!data.error && data.linked) {
+        setStudents(data.students);
+        setShopItems(data.shopItems || []);
+        setAnnouncement(data.announcement || "");
+      }
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -416,8 +456,36 @@ export default function ParentApp() {
     }
     const data0 = tg?.initData || "";
     setInitData(data0);
-    loadWithCreds(data0);
+    (async () => {
+      // Сначала пробуем без пароля (сработает, если Telegram уже привязан).
+      const first = await fetchMyData(data0);
+      if (first.linked) {
+        setStudents(first.students);
+        setShopItems(first.shopItems || []);
+        setAnnouncement(first.announcement || "");
+        setActiveId(first.students[0]?.id || null);
+        setPhase("ready");
+        return;
+      }
+      // Не привязан — пробуем логин/пароль, сохранённые с прошлого раза на этом устройстве.
+      let savedPhone = "", savedPassword = "";
+      try { savedPhone = localStorage.getItem("gu_phone") || ""; savedPassword = localStorage.getItem("gu_password") || ""; } catch {}
+      if (savedPhone && savedPassword) {
+        setPhone(savedPhone); setPassword(savedPassword);
+        await loadWithCreds(data0, savedPhone, savedPassword);
+        return;
+      }
+      setPhase("not_linked");
+    })();
   }, []);
+
+  // Обновляем данные сами: когда приложение снова становится видимым и каждые 25 секунд, пока открыто.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === "visible") silentRefresh(); };
+    document.addEventListener("visibilitychange", onVisible);
+    const interval = setInterval(() => silentRefresh(), 25000);
+    return () => { document.removeEventListener("visibilitychange", onVisible); clearInterval(interval); };
+  }, [phase, initData, phone, password]);
 
   const handleLogin = async () => {
     if (!phone.trim() || !password.trim()) return;
@@ -433,6 +501,7 @@ export default function ParentApp() {
   const handleLogout = () => {
     setStudents([]);
     setPhone(""); setPassword(""); setLoginError("");
+    try { localStorage.removeItem("gu_phone"); localStorage.removeItem("gu_password"); } catch {}
     setPhase("not_linked");
   };
 
@@ -459,8 +528,9 @@ export default function ParentApp() {
       <div style={{ background: PAPER }} className="min-h-screen flex items-center justify-center">
         <style>{FONT_IMPORT}</style>
         <div className="text-center">
-          <div className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-white text-[16px] font-extrabold anim-pop" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>GU</div>
+          <div className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-white text-[16px] font-extrabold" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})`, animation: "pulseLogo 1.1s ease-in-out infinite" }}>GU</div>
           <p className="text-[12.5px] opacity-45 mt-3">Загрузка…</p>
+          <style>{`@keyframes pulseLogo { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.92); opacity: 0.75; } }`}</style>
         </div>
       </div>
     );
@@ -501,18 +571,23 @@ export default function ParentApp() {
             <div className="text-[11.5px] opacity-45 mt-1">{student?.group?.name || "Global Up"}</div>
           </div>
         </div>
-        {students.length > 1 && (
-          <select value={activeId} onChange={(e) => setActiveId(e.target.value)} className="text-[12px] font-medium px-2.5 py-1.5 rounded-full outline-none" style={{ background: "#fff", border: `1px solid ${LINE}` }}>
-            {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        )}
+        <div className="flex items-center gap-2">
+          <button onClick={silentRefresh} disabled={refreshing} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#fff", border: `1px solid ${LINE}` }} title="Обновить">
+            <span style={{ display: "inline-block", fontSize: 15, animation: refreshing ? "spin 0.7s linear infinite" : "none" }}>🔄</span>
+          </button>
+          {students.length > 1 && (
+            <select value={activeId} onChange={(e) => setActiveId(e.target.value)} className="text-[12px] font-medium px-2.5 py-1.5 rounded-full outline-none" style={{ background: "#fff", border: `1px solid ${LINE}` }}>
+              {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
+        </div>
       </div>
-
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       {!student ? (
         <div className="px-4"><EmptyState text="Ученик не найден" /></div>
       ) : (
         <div className="px-4">
-          {tab === "home" && <HomeTab student={student} />}
+          {tab === "home" && <HomeTab student={student} announcement={announcement} />}
           {tab === "rating" && <RatingTab student={student} />}
           {tab === "shop" && <ShopTab student={student} shopItems={shopItems} onRedeem={handleRedeem} redeeming={redeeming} />}
           {tab === "profile" && <ProfileTab student={student} onLogout={handleLogout} />}
