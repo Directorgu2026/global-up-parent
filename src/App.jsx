@@ -227,7 +227,7 @@ export default function ParentApp() {
       const data = phoneVal ? await fetchMyData(data0, phoneVal, passwordVal) : await fetchMyData(data0);
       if (data.error) { setErrorMsg(data.error); setPhase("error"); return; }
       if (!data.linked) {
-        if (data.loginError) setLoginError(data.loginError);
+        if (phoneVal) setLoginError(data.loginError || `Сервер ответил без ошибки, но не привязал (диагностика): ${JSON.stringify(data)}`);
         setPhase("not_linked");
         return;
       }
@@ -303,7 +303,7 @@ export default function ParentApp() {
               <label className="text-[12px] opacity-50 block mb-1">Пароль</label>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full text-[14px] px-3 py-2.5 rounded-xl outline-none" style={{ border: `1px solid ${LINE}`, background: "#FAFAF7" }} />
             </div>
-            {loginError && <p className="text-[12.5px]" style={{ color: BRICK }}>{loginError}</p>}
+            {loginError && <p className="text-[12px] break-words" style={{ color: BRICK }}>{loginError}</p>}
             <button onClick={handleLogin} disabled={loginLoading} className="w-full text-[14px] font-medium py-2.5 rounded-xl text-white" style={{ background: TEAL, opacity: loginLoading ? 0.6 : 1 }}>
               {loginLoading ? "Проверяем…" : "Войти"}
             </button>
