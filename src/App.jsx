@@ -29,11 +29,11 @@ const fmt = (n) => Math.round(n || 0).toLocaleString("ru-RU");
 const ruDate = (iso) => new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" });
 const scheduleText = (g) => (g?.days && g.days.length ? `${g.days.join("/")} · ${g.start}–${g.end}` : "не задано");
 
-async function fetchMyData(initData) {
+async function fetchMyData(initData, phone, password) {
   const res = await fetch(EDGE_FUNCTION_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
-    body: JSON.stringify({ initData }),
+    body: JSON.stringify({ initData, phone, password }),
   });
   return res.json();
 }
@@ -206,7 +206,30 @@ export default function ParentApp() {
   const [students, setStudents] = useState([]);
   const [shopItems, setShopItems] = useState([]);
   const [activeId, setActiveId] = useState(null);
-  const [view, setView] = useState("parent"); // parent | child
+  const [initData, setInitData] = useState("");
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  const loadWithCreds = async (data0, phoneVal, passwordVal) => {
+    try {
+      const data = phoneVal ? await fetchMyData(data0, phoneVal, passwordVal) : await fetchMyData(data0);
+      if (data.error) { setErrorMsg(data.error); setPhase("error"); return; }
+      if (!data.linked) {
+        if (data.loginError) setLoginError(data.loginError);
+        setPhase("not_linked");
+        return;
+      }
+      setStudents(data.students);
+      setShopItems(data.shopItems || []);
+      setActiveId(data.students[0]?.id || null);
+      setPhase("ready");
+    } catch (e) {
+      setErrorMsg(String(e?.message || e));
+      setPhase("error");
+    }
+  };
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
@@ -215,23 +238,18 @@ export default function ParentApp() {
       tg.expand();
       if (tg.setHeaderColor) try { tg.setHeaderColor("#FAFAF7"); } catch {}
     }
-    const initData = tg?.initData || "";
-
-    (async () => {
-      try {
-        const data = await fetchMyData(initData);
-        if (data.error) { setErrorMsg(data.error); setPhase("error"); return; }
-        if (!data.linked) { setPhase("not_linked"); return; }
-        setStudents(data.students);
-        setShopItems(data.shopItems || []);
-        setActiveId(data.students[0]?.id || null);
-        setPhase("ready");
-      } catch (e) {
-        setErrorMsg(String(e?.message || e));
-        setPhase("error");
-      }
-    })();
+    const data0 = tg?.initData || "";
+    setInitData(data0);
+    loadWithCreds(data0);
   }, []);
+
+  const handleLogin = async () => {
+    if (!phone.trim() || !password.trim()) return;
+    setLoginError("");
+    setLoginLoading(true);
+    await loadWithCreds(initData, phone.trim(), password.trim());
+    setLoginLoading(false);
+  };
 
   const student = students.find((s) => s.id === activeId);
 
@@ -260,9 +278,24 @@ export default function ParentApp() {
     return (
       <div style={{ background: PAPER }} className="min-h-screen flex items-center justify-center p-4">
         <style>{FONT_IMPORT}</style>
-        <div className="max-w-sm text-center">
-          <p className="text-[14px] font-medium mb-1.5">Ваш Telegram пока не привязан к ученику</p>
-          <p className="text-[12.5px] opacity-55">Обратитесь к администратору центра — он привяжет ваш номер телефона к профилю ученика, и данные появятся здесь.</p>
+        <div className="w-full max-w-sm bg-white rounded-2xl p-6" style={{ border: `1px solid ${LINE}` }}>
+          <p className="text-[15px] font-semibold mb-1">Вход в личный кабинет</p>
+          <p className="text-[12.5px] opacity-55 mb-4">Введите номер телефона и пароль ученика — те же, что выдал администратор центра.</p>
+          <div className="space-y-3">
+            <div>
+              <label className="text-[12px] opacity-50 block mb-1">Номер телефона</label>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+998 90 123 45 67" className="w-full text-[14px] px-3 py-2.5 rounded-xl outline-none" style={{ border: `1px solid ${LINE}`, background: "#FAFAF7" }} />
+            </div>
+            <div>
+              <label className="text-[12px] opacity-50 block mb-1">Пароль</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full text-[14px] px-3 py-2.5 rounded-xl outline-none" style={{ border: `1px solid ${LINE}`, background: "#FAFAF7" }} />
+            </div>
+            {loginError && <p className="text-[12.5px]" style={{ color: BRICK }}>{loginError}</p>}
+            <button onClick={handleLogin} disabled={loginLoading} className="w-full text-[14px] font-medium py-2.5 rounded-xl text-white" style={{ background: TEAL, opacity: loginLoading ? 0.6 : 1 }}>
+              {loginLoading ? "Проверяем…" : "Войти"}
+            </button>
+          </div>
+          <p className="text-[11px] opacity-40 mt-4">После первого входа привязка запомнится — в следующий раз приложение откроется сразу, без пароля.</p>
         </div>
       </div>
     );
@@ -273,13 +306,7 @@ export default function ParentApp() {
       <style>{FONT_IMPORT}</style>
 
       <div className="sticky top-0 z-10 px-4 pt-4 pb-3" style={{ background: PAPER, borderBottom: `1px solid ${LINE}` }}>
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <div className="disp text-[16px] font-bold">Global Up</div>
-          <div className="flex rounded-full p-0.5" style={{ background: "#EEEEE8" }}>
-            <button onClick={() => setView("parent")} className="text-[12px] font-medium px-3 py-1.5 rounded-full" style={{ background: view === "parent" ? "#fff" : "transparent", color: view === "parent" ? INK : "#5B5B54" }}>Родитель</button>
-            <button onClick={() => setView("child")} className="text-[12px] font-medium px-3 py-1.5 rounded-full" style={{ background: view === "child" ? "#fff" : "transparent", color: view === "child" ? INK : "#5B5B54" }}>Ребёнок</button>
-          </div>
-        </div>
+        <div className="disp text-[16px] font-bold mb-2">Global Up</div>
         {students.length > 1 && (
           <div className="flex gap-1.5 overflow-x-auto">
             {students.map((s) => (
@@ -295,22 +322,11 @@ export default function ParentApp() {
         <div className="p-4"><EmptyState text="Ученик не найден." /></div>
       ) : (
         <div className="p-4 space-y-3">
-          {view === "child" ? (
-            <>
-              <CoinsCard student={student} shopItems={shopItems} />
-              <AttendanceCard student={student} />
-              <ScheduleCard student={student} />
-              <MaterialsCard student={student} />
-            </>
-          ) : (
-            <>
-              <ScheduleCard student={student} />
-              <AttendanceCard student={student} />
-              <DebtCard student={student} />
-              <CoinsCard student={student} shopItems={shopItems} />
-              <MaterialsCard student={student} />
-            </>
-          )}
+          <ScheduleCard student={student} />
+          <AttendanceCard student={student} />
+          <DebtCard student={student} />
+          <CoinsCard student={student} shopItems={shopItems} />
+          <MaterialsCard student={student} />
         </div>
       )}
     </div>
