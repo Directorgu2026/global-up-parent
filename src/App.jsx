@@ -36,6 +36,14 @@ body { -webkit-tap-highlight-color: transparent; }
 
 /* -------------------------------- Утилиты -------------------------------- */
 const fmt = (n) => Math.round(n || 0).toLocaleString("ru-RU");
+function formatUzPhone(digits) {
+  let out = "";
+  if (digits.length > 0) out += digits.slice(0, 2);
+  if (digits.length > 2) out += " " + digits.slice(2, 5);
+  if (digits.length > 5) out += " " + digits.slice(5, 7);
+  if (digits.length > 7) out += " " + digits.slice(7, 9);
+  return out;
+}
 const ruDate = (iso) => new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" });
 const scheduleText = (g) => (g?.days && g.days.length ? `${g.days.join("/")} · ${g.start}–${g.end}` : "не задано");
 const initials = (name) => (name || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
@@ -84,6 +92,57 @@ function Avatar({ name, size = 40 }) {
 }
 
 /* ------------------------------- Главная ------------------------------- */
+function ProgressRing({ pct, size = 108 }) {
+  const stroke = 11;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const offset = c - (Math.max(0, Math.min(100, pct)) / 100) * c;
+  const color = pct >= 90 ? GREEN_D : pct >= 75 ? GOLD : pct >= 50 ? BRICK : RED_D;
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} stroke="#EEEEE8" strokeWidth={stroke} fill="none" />
+        <circle cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={stroke} fill="none" strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.6s ease" }} />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-[22px] font-extrabold" style={{ color }}>{pct}%</span>
+      </div>
+    </div>
+  );
+}
+function ProgressCard({ log }) {
+  const total = log.length;
+  const present = log.filter((r) => r.present).length;
+  const pct = total ? Math.round((present / total) * 100) : 0;
+  let streak = 0;
+  for (const r of log) { if (r.present) streak++; else break; }
+  const label = total === 0 ? "Пока нет данных" : pct >= 90 ? "Отлично! Продолжай в том же духе" : pct >= 75 ? "Хорошо, но можно лучше" : pct >= 50 ? "Стоит подтянуть посещаемость" : "Много пропусков — постарайся не пропускать";
+  const labelColor = pct >= 90 ? GREEN_D : pct >= 75 ? "#854D0E" : BRICK;
+  return (
+    <Card className="p-4">
+      <h3 className="text-[14.5px] font-bold mb-3 flex items-center gap-1.5"><TrendingUp size={16} />Мой прогресс</h3>
+      <div className="flex items-center gap-4">
+        <ProgressRing pct={pct} />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold leading-snug" style={{ color: labelColor }}>{label}</p>
+          <div className="flex items-center gap-3 mt-2.5">
+            <div>
+              <div className="text-[17px] font-extrabold leading-none">{present}<span className="text-[11px] font-medium opacity-45">/{total}</span></div>
+              <div className="text-[10px] opacity-45 mt-1">занятий посещено</div>
+            </div>
+            {streak > 0 && (
+              <div>
+                <div className="text-[17px] font-extrabold leading-none flex items-center gap-1">{streak} <Flame size={15} style={{ color: BRICK }} /></div>
+                <div className="text-[10px] opacity-45 mt-1">подряд без пропусков</div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function HomeTab({ student, notifications = [] }) {
   const log = [...(student.attendanceLog || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   const total = log.length;
@@ -145,6 +204,8 @@ function HomeTab({ student, notifications = [] }) {
           <div className="text-[16px] font-extrabold mt-0.5 leading-tight">{student.coins}<span className="text-[10.5px] font-medium opacity-80 ml-1">GC</span></div>
         </div>
       </div>
+
+      <ProgressCard log={log} />
 
       {hasDebt && (
         <Card className="p-4" style={{ border: `1.5px solid ${RED_L}` }}>
@@ -389,6 +450,26 @@ function ProfileTab({ student, onLogout }) {
           <div className="flex items-center justify-between py-1.5"><span className="opacity-50">Долг</span><span className="font-semibold" style={{ color: student.debt > 0 ? RED_D : GREEN_D }}>{fmt(student.debt)} сум</span></div>
         </div>
       </Card>
+
+      {(student.adminTelegram || student.teacherTelegram) && (
+        <Card className="p-4">
+          <h3 className="text-[13.5px] font-bold mb-2.5">Связаться</h3>
+          <div className="space-y-2">
+            {student.adminTelegram && (
+              <a href={`https://t.me/${student.adminTelegram}`} target="_blank" rel="noreferrer" className="w-full flex items-center justify-between px-4 py-3 rounded-2xl" style={{ background: "#EEECFD" }}>
+                <span className="text-[13px] font-semibold" style={{ color: "#5B21B6" }}>Написать администрации</span>
+                <Megaphone size={16} style={{ color: "#5B21B6" }} />
+              </a>
+            )}
+            {student.teacherTelegram && (
+              <a href={`https://t.me/${student.teacherTelegram}`} target="_blank" rel="noreferrer" className="w-full flex items-center justify-between px-4 py-3 rounded-2xl" style={{ background: RED_L }}>
+                <span className="text-[13px] font-semibold" style={{ color: RED_D }}>Написать {student.teacherName || "преподавателю"}</span>
+                <GraduationCap size={16} style={{ color: RED_D }} />
+              </a>
+            )}
+          </div>
+        </Card>
+      )}
       {(student.payments || []).length > 0 && (
         <Card className="p-4">
           <h3 className="text-[13.5px] font-bold mb-2.5">Последние оплаты</h3>
@@ -423,7 +504,17 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
           <div className="space-y-3">
             <div>
               <label className="text-[12px] font-medium opacity-50 block mb-1.5">Номер телефона</label>
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+998 90 123 45 67" className="w-full text-[15px] px-4 py-3 rounded-2xl outline-none" style={{ border: `1.5px solid ${LINE}`, background: PAPER }} />
+              <div className="flex items-center gap-1.5">
+                <span className="shrink-0 px-3.5 py-3 rounded-2xl text-[14px] font-semibold" style={{ background: "#F3F1EA" }}>+998</span>
+                <input
+                  inputMode="numeric"
+                  value={formatUzPhone((phone || "").replace(/[^0-9]/g, "").replace(/^998/, "").slice(0, 9))}
+                  onChange={(e) => setPhone("+998 " + formatUzPhone(e.target.value.replace(/[^0-9]/g, "").slice(0, 9)))}
+                  placeholder="90 123 45 67"
+                  className="w-full text-[15px] px-4 py-3 rounded-2xl outline-none"
+                  style={{ border: `1.5px solid ${LINE}`, background: PAPER }}
+                />
+              </div>
             </div>
             <div>
               <label className="text-[12px] font-medium opacity-50 block mb-1.5">Пароль</label>
