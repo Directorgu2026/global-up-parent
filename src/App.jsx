@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
   FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
-  Award, Medal, TrendingUp, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone,
+  Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone,
 } from "lucide-react";
 
 /* ------------------------------ Настройка ------------------------------ */
@@ -92,16 +92,16 @@ function Avatar({ name, size = 40 }) {
 }
 
 /* ------------------------------- Главная ------------------------------- */
-function ProgressRing({ pct, size = 108 }) {
+function ProgressRing({ pct, size = 108, ringColor }) {
   const stroke = 11;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const offset = c - (Math.max(0, Math.min(100, pct)) / 100) * c;
-  const color = pct >= 90 ? GREEN_D : pct >= 75 ? GOLD : pct >= 50 ? BRICK : RED_D;
+  const color = ringColor || (pct >= 90 ? GREEN_D : pct >= 75 ? GOLD : pct >= 50 ? BRICK : RED_D);
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-        <circle cx={size / 2} cy={size / 2} r={r} stroke="#EEEEE8" strokeWidth={stroke} fill="none" />
+        <circle cx={size / 2} cy={size / 2} r={r} stroke="rgba(255,255,255,0.6)" strokeWidth={stroke} fill="none" />
         <circle cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={stroke} fill="none" strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.6s ease" }} />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
@@ -110,22 +110,55 @@ function ProgressRing({ pct, size = 108 }) {
     </div>
   );
 }
-function ProgressCard({ log }) {
+function trendArrow(log) {
+  const N = 5;
+  const recent = log.slice(0, N);
+  const older = log.slice(N, N * 2);
+  if (recent.length < 2 || older.length < 2) return null;
+  const pctOf = (arr) => (arr.length ? arr.filter((r) => r.present).length / arr.length : 0);
+  const diff = pctOf(recent) - pctOf(older);
+  if (diff > 0.05) return "up";
+  if (diff < -0.05) return "down";
+  return "same";
+}
+
+function ProgressCard({ log, generalGrades = [] }) {
   const total = log.length;
   const present = log.filter((r) => r.present).length;
   const pct = total ? Math.round((present / total) * 100) : 0;
   let streak = 0;
   for (const r of log) { if (r.present) streak++; else break; }
-  const label = total === 0 ? "Пока нет данных" : pct >= 90 ? "Отлично! Продолжай в том же духе" : pct >= 75 ? "Хорошо, но можно лучше" : pct >= 50 ? "Стоит подтянуть посещаемость" : "Много пропусков — постарайся не пропускать";
-  const labelColor = pct >= 90 ? GREEN_D : pct >= 75 ? "#854D0E" : BRICK;
+
+  // Светофор: красный / жёлтый / зелёный — понятно с одного взгляда
+  const zone = total === 0 ? "none" : pct >= 90 ? "green" : pct >= 60 ? "yellow" : "red";
+  const zoneColors = {
+    green: { bg: "linear-gradient(135deg, #DCFCE7, #F0FDF4)", ring: GREEN_D, text: GREEN_D, label: "Отлично! Продолжай в том же духе" },
+    yellow: { bg: "linear-gradient(135deg, #FEF9C3, #FFFBEB)", ring: GOLD, text: "#854D0E", label: "Неплохо, но можно лучше" },
+    red: { bg: "linear-gradient(135deg, #FEE2E2, #FEF2F2)", ring: RED_D, text: RED_D, label: "Много пропусков — постарайся не пропускать" },
+    none: { bg: PAPER, ring: "#D1D0C5", text: "#9C9A90", label: "Пока нет данных" },
+  }[zone];
+
+  const trend = trendArrow(log);
+  const lessonGrades = log.filter((r) => r.grade).map((r) => r.grade);
+  const allGrades = [...lessonGrades, ...generalGrades.map((g) => g.value)];
+  const avgGrade = allGrades.length ? (allGrades.reduce((a, b) => a + b, 0) / allGrades.length).toFixed(1) : null;
+
   return (
-    <Card className="p-4">
-      <h3 className="text-[14.5px] font-bold mb-3 flex items-center gap-1.5"><TrendingUp size={16} />Мой прогресс</h3>
+    <Card className="p-4" style={{ background: zoneColors.bg, border: "none" }}>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-[14.5px] font-bold flex items-center gap-1.5"><TrendingUp size={16} />Мой прогресс</h3>
+        {trend && (
+          <span className="flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.7)", color: trend === "up" ? GREEN_D : trend === "down" ? RED_D : "#6B6A60" }}>
+            {trend === "up" ? <TrendingUp size={12} /> : trend === "down" ? <TrendingDown size={12} /> : <Minus size={12} />}
+            {trend === "up" ? "Растёт" : trend === "down" ? "Снижается" : "Стабильно"}
+          </span>
+        )}
+      </div>
       <div className="flex items-center gap-4">
-        <ProgressRing pct={pct} />
+        <ProgressRing pct={pct} ringColor={zoneColors.ring} />
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-semibold leading-snug" style={{ color: labelColor }}>{label}</p>
-          <div className="flex items-center gap-3 mt-2.5">
+          <p className="text-[13px] font-bold leading-snug" style={{ color: zoneColors.text }}>{zoneColors.label}</p>
+          <div className="flex items-center gap-3 mt-2.5 flex-wrap">
             <div>
               <div className="text-[17px] font-extrabold leading-none">{present}<span className="text-[11px] font-medium opacity-45">/{total}</span></div>
               <div className="text-[10px] opacity-45 mt-1">занятий посещено</div>
@@ -134,6 +167,12 @@ function ProgressCard({ log }) {
               <div>
                 <div className="text-[17px] font-extrabold leading-none flex items-center gap-1">{streak} <Flame size={15} style={{ color: BRICK }} /></div>
                 <div className="text-[10px] opacity-45 mt-1">подряд без пропусков</div>
+              </div>
+            )}
+            {avgGrade && (
+              <div>
+                <div className="text-[17px] font-extrabold leading-none">{avgGrade}</div>
+                <div className="text-[10px] opacity-45 mt-1">средний балл</div>
               </div>
             )}
           </div>
@@ -205,7 +244,7 @@ function HomeTab({ student, notifications = [] }) {
         </div>
       </div>
 
-      <ProgressCard log={log} />
+      <ProgressCard log={log} generalGrades={student.generalGrades || []} />
 
       {hasDebt && (
         <Card className="p-4" style={{ border: `1.5px solid ${RED_L}` }}>
