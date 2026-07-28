@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
   FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
@@ -179,6 +179,36 @@ function ProgressCard({ log, generalGrades = [] }) {
         </div>
       </div>
     </Card>
+  );
+}
+
+function ConfettiOverlay({ amount, onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 2800); return () => clearTimeout(t); }, []);
+  const pieces = useMemo(() => Array.from({ length: 70 }, (_, i) => ({
+    id: i,
+    left: Math.random() * 100,
+    delay: Math.random() * 0.5,
+    duration: 1.8 + Math.random() * 1.4,
+    color: [RED, GOLD, GREEN, BLUE, PURPLE, BRICK][i % 6],
+    rotate: Math.random() * 360,
+    size: 6 + Math.random() * 8,
+  })), []);
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden" style={{ background: "rgba(0,0,0,0.15)" }} onClick={onDone}>
+      {pieces.map((p) => (
+        <div key={p.id} style={{
+          position: "absolute", top: -20, left: `${p.left}%`, width: p.size, height: p.size * 0.4,
+          background: p.color, transform: `rotate(${p.rotate}deg)`,
+          animation: `confettiFall ${p.duration}s ease-in ${p.delay}s forwards`,
+        }} />
+      ))}
+      <div className="anim-pop bg-white rounded-3xl px-9 py-8 text-center shadow-2xl mx-6">
+        <div className="text-[52px] leading-none">🪙</div>
+        <div className="text-[30px] font-extrabold mt-2" style={{ color: "#B45309" }}>+{amount} GC</div>
+        <div className="text-[13px] opacity-50 mt-1.5">Начислены GlobalCoins!</div>
+      </div>
+      <style>{`@keyframes confettiFall { to { transform: translateY(115vh) rotate(720deg); opacity: 0.4; } }`}</style>
+    </div>
   );
 }
 
@@ -593,6 +623,21 @@ export default function ParentApp() {
   const [tab, setTab] = useState("home");
   const [redeeming, setRedeeming] = useState(false);
   const [toast, setToast] = useState("");
+  const [coinGain, setCoinGain] = useState(null); // { amount } — показывает конфетти, когда монеты выросли
+  const lastCoinsRef = useRef({}); // studentId -> последний известный баланс монет
+
+  // Оборачивает setStudents: сравнивает баланс монет каждого ученика с прошлым разом
+  // и, если он вырос (учитель/админ начислил), показывает конфетти с количеством монет.
+  const applyStudents = (nextStudents) => {
+    let gained = 0;
+    (nextStudents || []).forEach((s) => {
+      const prev = lastCoinsRef.current[s.id];
+      if (prev !== undefined && s.coins > prev) gained += s.coins - prev;
+      lastCoinsRef.current[s.id] = s.coins;
+    });
+    if (gained > 0) setCoinGain({ amount: gained });
+    setStudents(nextStudents || []);
+  };
 
   const loadWithCreds = async (data0, phoneVal, passwordVal) => {
     try {
@@ -607,7 +652,7 @@ export default function ParentApp() {
         setPhase("not_linked");
         return;
       }
-      setStudents(data.students);
+      applyStudents(data.students);
       setShopItems(data.shopItems || []);
       setActiveId(data.students[0]?.id || null);
       setPhase("ready");
@@ -627,7 +672,7 @@ export default function ParentApp() {
     try {
       const data = await fetchMyData(initData, phone.trim() || null, password.trim() || null);
       if (!data.error && data.linked) {
-        setStudents(data.students);
+        applyStudents(data.students);
         setShopItems(data.shopItems || []);
       }
     } finally {
@@ -649,7 +694,7 @@ export default function ParentApp() {
       // Сначала пробуем без пароля (сработает, если Telegram уже привязан).
       const first = await fetchMyData(data0);
       if (first.linked) {
-        setStudents(first.students);
+        applyStudents(first.students);
         setShopItems(first.shopItems || []);
         setActiveId(first.students[0]?.id || null);
         setPhase("ready");
@@ -688,6 +733,7 @@ export default function ParentApp() {
 
   const handleLogout = () => {
     setStudents([]);
+    lastCoinsRef.current = {};
     setPhone(""); setPassword(""); setLoginError("");
     try { localStorage.removeItem("gu_phone"); localStorage.removeItem("gu_password"); } catch {}
     setPhase("not_linked");
@@ -703,7 +749,7 @@ export default function ParentApp() {
       if (data.error) { setToast(data.error); setTimeout(() => setToast(""), 3000); return; }
       if (!data.linked) { setToast("Не удалось подтвердить личность — откройте приложение заново и попробуйте снова."); setTimeout(() => setToast(""), 4000); return; }
       if (data.redeemed) {
-        setStudents(data.students);
+        applyStudents(data.students);
         setToast("Заявка отправлена! Дождитесь выдачи у администратора.");
         setTimeout(() => setToast(""), 3500);
       }
@@ -745,6 +791,8 @@ export default function ParentApp() {
   return (
     <div style={{ background: PAPER, color: INK }} className="min-h-screen anim-fade pb-24">
       <style>{FONT_IMPORT}</style>
+
+      {coinGain && <ConfettiOverlay amount={coinGain.amount} onDone={() => setCoinGain(null)} />}
 
       {toast && (
         <div className="fixed top-4 left-4 right-4 z-50 px-4 py-3 rounded-2xl text-[13px] font-medium text-white text-center" style={{ background: RED_D, boxShadow: "0 4px 16px rgba(0,0,0,0.2)" }}>
