@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
   FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
-  Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone,
+  Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone, PiggyBank,
 } from "lucide-react";
 
 /* ------------------------------ Настройка ------------------------------ */
@@ -262,6 +262,11 @@ function HomeTab({ student, notifications = [] }) {
           <p className="text-[10.5px] font-medium opacity-85 uppercase tracking-wide mt-2">{hasDebt ? "Долг" : "Баланс"}</p>
           {hasDebt ? (
             <div className="text-[16px] font-extrabold mt-0.5 leading-tight">{fmt(student.debt)}<span className="text-[10.5px] font-medium opacity-80 ml-1">сум</span></div>
+          ) : (student.prepaidCredit || 0) > 0 ? (
+            <>
+              <div className="text-[16px] font-extrabold mt-0.5 leading-tight">{fmt(student.prepaidCredit)}<span className="text-[10.5px] font-medium opacity-80 ml-1">сум</span></div>
+              <div className="text-[10px] mt-1 opacity-90">В счёт след. месяца</div>
+            </>
           ) : (
             <div className="flex items-center gap-1 mt-1.5 text-[12px] font-semibold"><CheckCircle2 size={14} /> Долгов нет</div>
           )}
@@ -273,6 +278,12 @@ function HomeTab({ student, notifications = [] }) {
           <div className="text-[16px] font-extrabold mt-0.5 leading-tight">{student.coins}<span className="text-[10.5px] font-medium opacity-80 ml-1">GC</span></div>
         </div>
       </div>
+      {hasDebt && (student.prepaidCredit || 0) > 0 && (
+        <div className="rounded-2xl p-3 flex items-center gap-2" style={{ background: "#DCFCE7" }}>
+          <PiggyBank size={16} style={{ color: GREEN_D }} />
+          <p className="text-[12.5px] font-medium" style={{ color: GREEN_D }}>На балансе {fmt(student.prepaidCredit)} сум — уменьшит следующее начисление</p>
+        </div>
+      )}
 
       <ProgressCard log={log} generalGrades={student.generalGrades || []} />
 
