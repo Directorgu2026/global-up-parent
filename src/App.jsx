@@ -254,21 +254,20 @@ function HomeTab({ student, notifications = [] }) {
         </div>
       )}
 
-      {/* Баланс и GlobalCoins — рядом, в отдельных рамках */}
+      {/* Баланс и GlobalCoins — рядом, в отдельных рамках. Баланс — это всегда конкретное число. */}
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-3xl p-4 text-white relative overflow-hidden" style={{ background: hasDebt ? `linear-gradient(135deg, ${RED}, ${RED_D})` : `linear-gradient(135deg, ${GREEN}, ${GREEN_D})` }}>
           <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
           <Wallet size={19} className="opacity-90" />
           <p className="text-[10.5px] font-medium opacity-85 uppercase tracking-wide mt-2">{hasDebt ? "Долг" : "Баланс"}</p>
-          {hasDebt ? (
-            <div className="text-[16px] font-extrabold mt-0.5 leading-tight">{fmt(student.debt)}<span className="text-[10.5px] font-medium opacity-80 ml-1">сум</span></div>
-          ) : (student.prepaidCredit || 0) > 0 ? (
-            <>
-              <div className="text-[16px] font-extrabold mt-0.5 leading-tight">{fmt(student.prepaidCredit)}<span className="text-[10.5px] font-medium opacity-80 ml-1">сум</span></div>
-              <div className="text-[10px] mt-1 opacity-90">В счёт след. месяца</div>
-            </>
-          ) : (
-            <div className="flex items-center gap-1 mt-1.5 text-[12px] font-semibold"><CheckCircle2 size={14} /> Долгов нет</div>
+          <div className="text-[16px] font-extrabold mt-0.5 leading-tight">
+            {fmt(hasDebt ? student.debt : (student.prepaidCredit || 0))}
+            <span className="text-[10.5px] font-medium opacity-80 ml-1">сум</span>
+          </div>
+          {!hasDebt && (
+            <div className="flex items-center gap-1 mt-1 text-[10.5px] opacity-90">
+              <CheckCircle2 size={12} /> {(student.prepaidCredit || 0) > 0 ? "В счёт след. месяца" : "Долгов нет"}
+            </div>
           )}
         </div>
         <div className="rounded-3xl p-4 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${GOLD}, #B45309)` }}>
