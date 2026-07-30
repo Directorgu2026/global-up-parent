@@ -1,65 +1,957 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
-  FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
-  Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone, PiggyBank,
+  ChevronLeft, ChevronRight, ChevronDown, Coins, CheckCircle2, AlertTriangle,
+  UserCircle2, LogOut, Loader2, Printer, X, RefreshCw,
 } from "lucide-react";
-
-/* ------------------------------ Настройка ------------------------------ */
-const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
-const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
 
 /* ------------------------------ Стиль/тема ------------------------------ */
 const INK = "var(--ink)";
 const PAPER = "var(--paper)";
-const RED = "#DC2626";
-const LANG_FLAGS = { ru: "🇷🇺", en: "🇬🇧", uz: "🇺🇿" };
-const RED_D = "#991B1B";
-const RED_L = "#FEE2E2";
+const TEAL = "#DC2626";
+const TEAL_D = "#991B1B";
 const GOLD = "#EAB308";
 const BRICK = "#EA580C";
 const GREEN = "#16A34A";
 const GREEN_D = "#15803D";
-const BLUE = "#2563EB";
-const PURPLE = "#7C3AED";
 const LINE = "var(--line)";
+const LANG_FLAGS = { ru: "🇷🇺", en: "🇬🇧", uz: "🇺🇿" };
+const LOCALE_OF = { ru: "ru-RU", en: "en-US", uz: "uz-Latn" };
 
 const THEME_VARS = `
   .theme-light {
-    --paper: #F7F5F0; --ink: #1A1A17; --line: #EDEBE4; --surface: #FFFFFF;
+    --paper: #FAFAF7; --ink: #1A1A17; --line: #E7E5DC; --surface: #FFFFFF;
     --surface-soft: #F6F7FB; --surface-alt: #EEEEE8;
-    --soft-red-bg: #FEE2E2; --soft-red-fg: #991B1B;
-    --soft-yellow-bg: #FEF9C3; --soft-yellow-bg-2: #FFFBEB; --soft-yellow-border: #FEF3C7; --soft-yellow-fg: #854D0E;
-    --soft-green-bg: #DCFCE7; --soft-green-fg: #15803D;
-    --soft-blue-bg: #DBEAFE; --soft-blue-fg: #1D4ED8;
-    --soft-purple-bg: #EDE9FE; --soft-purple-bg-2: #EEECFD; --soft-purple-fg: #5B21B6;
-    --soft-orange-bg: #FFF7ED; --notice-border: #FDE68A;
+    --soft-yellow-bg: #FEF9C3; --soft-yellow-fg: #854D0E;
+    --soft-purple-bg: #EEECFD;
   }
   .theme-dark {
     --paper: #16171C; --ink: #EDECE6; --line: #2C2D33; --surface: #202127;
     --surface-soft: #23242B; --surface-alt: #2A2B32;
-    --soft-red-bg: #3D2020; --soft-red-fg: #FCA5A5;
-    --soft-yellow-bg: #3A3018; --soft-yellow-bg-2: #322A16; --soft-yellow-border: #453A1C; --soft-yellow-fg: #F3D28A;
-    --soft-green-bg: #1B3327; --soft-green-fg: #86EFAC;
-    --soft-blue-bg: #1D2A45; --soft-blue-fg: #93C5FD;
-    --soft-purple-bg: #2B2140; --soft-purple-bg-2: #281F3C; --soft-purple-fg: #D8B4FE;
-    --soft-orange-bg: #3A2C1C; --notice-border: #5C4A22;
+    --soft-yellow-bg: #3A3018; --soft-yellow-fg: #F3D28A;
+    --soft-purple-bg: #2B2140;
   }
 `;
 
 const FONT_IMPORT = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-* { font-family: 'Inter', sans-serif; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+.disp { font-family: 'Inter', sans-serif; font-weight: 700; }
 .mono { font-variant-numeric: tabular-nums; }
+.app-bg { background: var(--paper); }
+.card-surface { box-shadow: 0 1px 2px rgba(19,36,54,0.04), 0 1px 1px rgba(19,36,54,0.03); }
+.anim-pop { animation: popIn 0.16s ease-out; }
 .anim-fade { animation: fadeIn 0.15s ease-out; }
-.anim-pop { animation: popIn 0.18s cubic-bezier(0.34,1.56,0.64,1); }
+.anim-slide { animation: slideIn 0.2s ease-out; }
+@keyframes popIn { from { opacity: 0; transform: scale(0.97) translateY(2px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes popIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
-body { -webkit-tap-highlight-color: transparent; }
+@keyframes slideIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 `;
 
+const DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const DAY_INDEX = { "Вс": 0, "Пн": 1, "Вт": 2, "Ср": 3, "Чт": 4, "Пт": 5, "Сб": 6 };
+const DAY_LABEL = {
+  ru: { "Пн": "Пн", "Вт": "Вт", "Ср": "Ср", "Чт": "Чт", "Пт": "Пт", "Сб": "Сб", "Вс": "Вс" },
+  en: { "Пн": "Mon", "Вт": "Tue", "Ср": "Wed", "Чт": "Thu", "Пт": "Fri", "Сб": "Sat", "Вс": "Sun" },
+  uz: { "Пн": "Dush", "Вт": "Sesh", "Ср": "Chor", "Чт": "Pay", "Пт": "Jum", "Сб": "Shan", "Вс": "Yak" },
+};
+const dayLabel = (day, lang) => (DAY_LABEL[lang] && DAY_LABEL[lang][day]) || day;
+
 /* -------------------------------- Утилиты -------------------------------- */
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const fmt = (n) => Math.round(n || 0).toLocaleString("ru-RU");
+const ruDate = (iso, locale = "ru-RU") => new Date(iso).toLocaleDateString(locale, { day: "2-digit", month: "short" });
+const toDateKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const monthKeyOf = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
+const toMinutes = (hhmm) => { const [h, mnt] = (hhmm || "0:0").split(":").map(Number); return h * 60 + mnt; };
+const scheduleText = (g, fallback = "не задано") => (g.days && g.days.length ? `${g.days.join("/")} · ${g.start}–${g.end}` : fallback);
+
+/* ------------------------------ Переводы ------------------------------ */
+const TRANSLATIONS = {
+  ru: {
+    login_title: "Глобал Ап",
+    login_subtitle: "Кабинет учителя",
+    phone_label: "Номер телефона",
+    password_label: "Пароль",
+    login_btn: "Войти",
+    login_remember_note: "После первого входа вход запомнится на этом устройстве.",
+    loading: "Загрузка…",
+    load_error_title: "Не удалось загрузить данные",
+    reload_btn: "Обновить страницу",
+    logout: "Выйти",
+    refresh: "Обновить",
+    hello: "Здравствуйте, {name}",
+    group_word_one: "группа", group_word_few: "групп",
+    notification_btn: "Уведомление",
+    salary_btn: "Моя зарплата",
+    tab_groups: "Мои группы", tab_schedule: "Расписание", tab_ranking: "Рейтинг",
+    important_notice: "Важное уведомление",
+    settings: "Настройки", language: "Язык", theme: "Тема",
+    theme_light: "Светлая", theme_dark: "Тёмная",
+    no_groups: "Пока нет ни одной группы",
+    students_count: "учеников",
+    open_journal: "Открыть журнал",
+    today: "Сегодня", no_lessons_today: "Сегодня занятий нет",
+    ranking_title: "Рейтинг моих учеников",
+    avg_grade: "Средний балл", attendance: "Посещаемость",
+    journal_title: "Журнал: {name}",
+    mark_all_present: "Отметить всех как «Был»",
+    materials_title: "Материалы / ДЗ",
+    add_material: "Добавить материал",
+    material_text_placeholder: "Текст задания",
+    material_link_placeholder: "Ссылка (необязательно)",
+    save: "Сохранить", cancel: "Отмена", delete: "Удалить",
+    no_materials: "Пока нет материалов",
+    award_coins_placeholder: "Кол-во монет",
+    award: "Начислить",
+    salary_title: "Моя зарплата",
+    revenue_label: "Выручка по группам", rate_label: "Ставка",
+    advance_label: "Аванс", already_paid_label: "Уже выплачено", net_label: "К выплате",
+    announcement_title: "Уведомление родителям/ученикам",
+    announcement_hint: "Увидят только те, кому адресовано — в личном кабинете. Директору и администратору это уведомление не показывается.",
+    announcement_target: "Кому отправить",
+    announcement_all: "Всем моим ученикам (все мои группы)",
+    announcement_only_group: "Только группа: {name}",
+    announcement_text_placeholder: "Например: Завтра занятия не будет — праздничный день",
+    announcement_urgent: "Важное — показать крупно, красным, наверху",
+    send: "Отправить",
+    no_student_found: "Ваш номер телефона не найден среди учителей в базе. Обратитесь к администратору.",
+    width_label: "Ширина ленты:",
+    print_receipt: "Печать чека",
+    days_left: "{n} дн. до конца курса", course_finished: "курс завершён",
+    mark_attendance_btn: "Отметить посещаемость",
+    no_groups_assigned: "Пока нет ни одной закреплённой группы — обратитесь к администратору.",
+    no_groups_schedule: "Пока нет групп в расписании.",
+    no_lessons: "Занятий нет.", today_pill: "сегодня",
+    no_students_ranking: "Пока нет учеников для рейтинга.",
+    attendance_pct: "{pct}% посещ.",
+    students_suffix: "учеников",
+    students_suffix: "учеников",
+    add_students_first: "Сначала добавьте учеников в группу.",
+    prev_month: "Предыдущий месяц", next_month: "Следующий месяц", current_month_btn: "Текущий",
+    legend_no_mark: "нет отметки, кликните", legend_present: "Был", legend_absent: "Не был", legend_excused: "Уваж. причина", legend_future: "Ещё не было",
+    grade_hint: "Под отметкой посещения — кнопка «оц.»: нажмите, чтобы выбрать оценку 1–5 одним касанием.",
+    no_lessons_month: "В этом месяце по расписанию группы занятий нет.",
+    name_col: "Имя", mark_all_tooltip: "Отметить всех как «Был»", mark_all_short: "все ✓",
+    present_label: "Был", absent_label: "Нет", excused_short: "Ув.",
+    mark_click_hint: "Клик: Был → Не был → Не был (уваж. причина) → снять отметку",
+    grade_short: "оц.", grade_tooltip: "Поставить оценку", grade_title: "Оценка: {name}", remove_grade: "Снять оценку",
+    grade_short: "оц.", grade_tooltip: "Поставить оценку", grade_title: "Оценка: {name}", remove_grade: "Снять оценку",
+    group_composition: "Состав группы", no_students_in_group: "В группе пока нет учеников.",
+    unpaid_month: "не оплачено за месяц", paid_status: "оплачено",
+    journal_footer_note: "Клик по ячейке: «Был» → «Не был» → «Не был (уваж. причина)» → снять отметку. GlobalCoins — максимум 25 за раз. Статус оплаты показывает только оплачено/нет — суммы и долги видит только администрация.",
+    fixed_rate: "Фиксированная ставка", percent_rate: "{pct}% от выручки", percent_bonus_rate: "{pct}% + бонус",
+    fixed_rate: "Фиксированная ставка", percent_rate: "{pct}% от выручки", percent_bonus_rate: "{pct}% + бонус",
+    no_groups_period: "Пока нет групп.", students_short: "уч.", lessons_month_short: "уроков в месяце",
+    revenue_total: "Выручка всего", formula_label: "Формула", advance_given: "Уже выдан аванс",
+    remainder_to_pay: "Остаток к выплате",
+    no_schedule: "не задано",
+    server_timeout: "Сервер не ответил вовремя — проверьте интернет-соединение.",
+    server_unreachable: "Нет связи с сервером: {msg}",
+    login_failed_generic: "Не удалось войти",
+    session_error: "Ошибка входа — попробуйте перезайти",
+  },
+  en: {
+    login_title: "Global Up",
+    login_subtitle: "Teacher portal",
+    phone_label: "Phone number",
+    password_label: "Password",
+    login_btn: "Log in",
+    login_remember_note: "After the first login this device will stay signed in.",
+    loading: "Loading…",
+    load_error_title: "Could not load data",
+    reload_btn: "Reload page",
+    logout: "Log out",
+    refresh: "Refresh",
+    hello: "Hello, {name}",
+    group_word_one: "group", group_word_few: "groups",
+    notification_btn: "Notification",
+    salary_btn: "My salary",
+    tab_groups: "My groups", tab_schedule: "Schedule", tab_ranking: "Ranking",
+    important_notice: "Important notice",
+    settings: "Settings", language: "Language", theme: "Theme",
+    theme_light: "Light", theme_dark: "Dark",
+    no_groups: "No groups yet",
+    students_count: "students",
+    open_journal: "Open journal",
+    today: "Today", no_lessons_today: "No lessons today",
+    ranking_title: "My students' ranking",
+    avg_grade: "Average grade", attendance: "Attendance",
+    journal_title: "Journal: {name}",
+    mark_all_present: "Mark everyone as Present",
+    materials_title: "Materials / Homework",
+    add_material: "Add material",
+    material_text_placeholder: "Assignment text",
+    material_link_placeholder: "Link (optional)",
+    save: "Save", cancel: "Cancel", delete: "Delete",
+    no_materials: "No materials yet",
+    award_coins_placeholder: "Amount of coins",
+    award: "Award",
+    salary_title: "My salary",
+    revenue_label: "Revenue from my groups", rate_label: "Rate",
+    advance_label: "Advance", already_paid_label: "Already paid", net_label: "Net to pay",
+    announcement_title: "Notification to parents/students",
+    announcement_hint: "Seen only by those it's addressed to — in their personal account. Not shown to the director or admin.",
+    announcement_target: "Send to",
+    announcement_all: "All my students (all my groups)",
+    announcement_only_group: "Only group: {name}",
+    announcement_text_placeholder: "e.g.: No classes tomorrow — public holiday",
+    announcement_urgent: "Important — show big and red, at the top",
+    send: "Send",
+    no_student_found: "Your phone number was not found among teachers in the database. Contact the administrator.",
+    width_label: "Tape width:",
+    print_receipt: "Print receipt",
+    days_left: "{n} days left in the course", course_finished: "course finished",
+    mark_attendance_btn: "Mark attendance",
+    no_groups_assigned: "No groups assigned yet — contact the administrator.",
+    no_groups_schedule: "No groups in the schedule.",
+    no_lessons: "No lessons.", today_pill: "today",
+    no_students_ranking: "No students for ranking yet.",
+    attendance_pct: "{pct}% attend.",
+    students_suffix: "students",
+    students_suffix: "students",
+    add_students_first: "Add students to the group first.",
+    prev_month: "Previous month", next_month: "Next month", current_month_btn: "Current",
+    legend_no_mark: "no mark, click", legend_present: "Present", legend_absent: "Absent", legend_excused: "Excused", legend_future: "Not yet held",
+    grade_hint: "Under the attendance mark — the \"gr.\" button: tap to pick a grade 1–5 in one touch.",
+    no_lessons_month: "No lessons scheduled for the group this month.",
+    name_col: "Name", mark_all_tooltip: "Mark everyone as Present", mark_all_short: "all ✓",
+    present_label: "Present", absent_label: "Absent", excused_short: "Exc.",
+    mark_click_hint: "Click: Present → Absent → Absent (excused) → clear mark",
+    grade_short: "gr.", grade_tooltip: "Set a grade", grade_title: "Grade: {name}", remove_grade: "Remove grade",
+    grade_short: "gr.", grade_tooltip: "Set a grade", grade_title: "Grade: {name}", remove_grade: "Remove grade",
+    group_composition: "Group roster", no_students_in_group: "No students in the group yet.",
+    unpaid_month: "unpaid this month", paid_status: "paid",
+    journal_footer_note: "Click a cell: Present → Absent → Absent (excused) → clear mark. GlobalCoins — max 25 at a time. Payment status only shows paid/unpaid — amounts and debts are visible to administration only.",
+    fixed_rate: "Fixed rate", percent_rate: "{pct}% of revenue", percent_bonus_rate: "{pct}% + bonus",
+    fixed_rate: "Fixed rate", percent_rate: "{pct}% of revenue", percent_bonus_rate: "{pct}% + bonus",
+    no_groups_period: "No groups yet.", students_short: "st.", lessons_month_short: "lessons this month",
+    revenue_total: "Total revenue", formula_label: "Formula", advance_given: "Advance already paid",
+    remainder_to_pay: "Remaining to pay",
+    no_schedule: "not set",
+    server_timeout: "The server did not respond in time — check your connection.",
+    server_unreachable: "No connection to server: {msg}",
+    login_failed_generic: "Could not log in",
+    session_error: "Login error — try signing in again",
+  },
+  uz: {
+    login_title: "Global Up",
+    login_subtitle: "O'qituvchi kabineti",
+    phone_label: "Telefon raqami",
+    password_label: "Parol",
+    login_btn: "Kirish",
+    login_remember_note: "Birinchi kirishdan so'ng bu qurilmada kirish saqlanadi.",
+    loading: "Yuklanmoqda…",
+    load_error_title: "Ma'lumotlarni yuklab bo'lmadi",
+    reload_btn: "Sahifani yangilash",
+    logout: "Chiqish",
+    refresh: "Yangilash",
+    hello: "Assalomu alaykum, {name}",
+    group_word_one: "guruh", group_word_few: "guruh",
+    notification_btn: "Xabar",
+    salary_btn: "Mening maoshim",
+    tab_groups: "Mening guruhlarim", tab_schedule: "Dars jadvali", tab_ranking: "Reyting",
+    important_notice: "Muhim xabar",
+    settings: "Sozlamalar", language: "Til", theme: "Mavzu",
+    theme_light: "Yorug'", theme_dark: "Tungi",
+    no_groups: "Hozircha birorta ham guruh yo'q",
+    students_count: "o'quvchi",
+    open_journal: "Jurnalni ochish",
+    today: "Bugun", no_lessons_today: "Bugun dars yo'q",
+    ranking_title: "O'quvchilarim reytingi",
+    avg_grade: "O'rtacha baho", attendance: "Davomat",
+    journal_title: "Jurnal: {name}",
+    mark_all_present: "Hammani "Keldi" deb belgilash",
+    materials_title: "Materiallar / Uy vazifasi",
+    add_material: "Material qo'shish",
+    material_text_placeholder: "Vazifa matni",
+    material_link_placeholder: "Havola (ixtiyoriy)",
+    save: "Saqlash", cancel: "Bekor qilish", delete: "O'chirish",
+    no_materials: "Hozircha materiallar yo'q",
+    award_coins_placeholder: "Coinlar soni",
+    award: "Berish",
+    salary_title: "Mening maoshim",
+    revenue_label: "Guruhlarim bo'yicha tushum", rate_label: "Stavka",
+    advance_label: "Avans", already_paid_label: "Allaqachon to'langan", net_label: "To'lanadigan summa",
+    announcement_title: "Ota-onalar/o'quvchilarga xabar",
+    announcement_hint: "Faqat kimga yo'llangan bo'lsa, o'sha ko'radi — shaxsiy kabinetida. Direktor va administratorga bu xabar ko'rinmaydi.",
+    announcement_target: "Kimga yuborish",
+    announcement_all: "Barcha o'quvchilarimga (barcha guruhlarim)",
+    announcement_only_group: "Faqat guruh: {name}",
+    announcement_text_placeholder: "Masalan: Ertaga dars bo'lmaydi — bayram kuni",
+    announcement_urgent: "Muhim — katta va qizil rangda, yuqorida ko'rsatish",
+    send: "Yuborish",
+    no_student_found: "Telefon raqamingiz o'qituvchilar bazasida topilmadi. Administratorga murojaat qiling.",
+    width_label: "Lenta kengligi:",
+    print_receipt: "Chekni chop etish",
+    days_left: "Kursgacha {n} kun qoldi", course_finished: "kurs tugadi",
+    mark_attendance_btn: "Davomatni belgilash",
+    no_groups_assigned: "Hozircha birorta guruh biriktirilmagan. Administratorga murojaat qiling.",
+    no_groups_schedule: "Dars jadvalida guruhlar yo'q.",
+    no_lessons: "Darslar yo'q.", today_pill: "bugun",
+    no_students_ranking: "Reyting uchun hozircha o'quvchilar yo'q.",
+    attendance_pct: "{pct}% davomat",
+    students_suffix: "o'quvchi",
+    students_suffix: "o'quvchi",
+    add_students_first: "Avval guruhga o'quvchilarni qo'shing.",
+    prev_month: "Oldingi oy", next_month: "Keyingi oy", current_month_btn: "Joriy",
+    legend_no_mark: "belgi yo'q, bosing", legend_present: "Keldi", legend_absent: "Kelmadi", legend_excused: "Uzrli sabab", legend_future: "Hali bo'lmagan",
+    grade_hint: "Davomat belgisi ostida \"bh.\" tugmasi bor: bir bosishda 1–5 baho qo'yish uchun bosing.",
+    no_lessons_month: "Bu oyda guruh jadvali bo'yicha darslar yo'q.",
+    name_col: "Ism", mark_all_tooltip: "Hammani "Keldi" deb belgilash", mark_all_short: "hammasi ✓",
+    present_label: "Keldi", absent_label: "Kelmadi", excused_short: "Uzr.",
+    mark_click_hint: "Bosish: Keldi → Kelmadi → Kelmadi (uzrli) → belgini olib tashlash",
+    grade_short: "bh.", grade_tooltip: "Baho qo'yish", grade_title: "Baho: {name}", remove_grade: "Bahoni olib tashlash",
+    grade_short: "bh.", grade_tooltip: "Baho qo'yish", grade_title: "Baho: {name}", remove_grade: "Bahoni olib tashlash",
+    group_composition: "Guruh tarkibi", no_students_in_group: "Guruhda hali o'quvchilar yo'q.",
+    unpaid_month: "bu oy uchun to'lanmagan", paid_status: "to'langan",
+    journal_footer_note: "Katakchani bosish: Keldi → Kelmadi → Kelmadi (uzrli) → belgini olib tashlash. GlobalCoins — bir safarda maksimal 25. To'lov holati faqat to'langan/to'lanmaganini ko'rsatadi — summalar va qarzlarni faqat ma'muriyat ko'radi.",
+    fixed_rate: "Belgilangan stavka", percent_rate: "Tushumning {pct}%i", percent_bonus_rate: "{pct}% + bonus",
+    fixed_rate: "Belgilangan stavka", percent_rate: "Tushumning {pct}%i", percent_bonus_rate: "{pct}% + bonus",
+    no_groups_period: "Hozircha guruhlar yo'q.", students_short: "o'q.", lessons_month_short: "bu oyda darslar",
+    revenue_total: "Umumiy tushum", formula_label: "Formula", advance_given: "Avans allaqachon berilgan",
+    remainder_to_pay: "To'lanadigan qoldiq",
+    no_schedule: "belgilanmagan",
+    server_timeout: "Server javob bermadi — internetni tekshiring.",
+    server_unreachable: "Server bilan aloqa yo'q: {msg}",
+    login_failed_generic: "Kirib bo'lmadi",
+    session_error: "Kirishda xatolik — qayta urinib ko'ring",
+  },
+};
+function translate(lang, key, vars) {
+  let str = (TRANSLATIONS[lang] && TRANSLATIONS[lang][key]) || TRANSLATIONS.ru[key] || key;
+  if (vars) Object.keys(vars).forEach((k) => { str = str.replace(`{${k}}`, vars[k]); });
+  return str;
+}
+
+function countLessonsInMonth(days, year, month, fromDay = 1) {
+  const wanted = new Set((days || []).map((d) => DAY_INDEX[d]));
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  let count = 0;
+  for (let day = fromDay; day <= daysInMonth; day++) {
+    if (wanted.has(new Date(year, month, day).getDay())) count++;
+  }
+  return count;
+}
+function lessonDatesInMonth(days, year, month) {
+  const wanted = new Set((days || []).map((d) => DAY_INDEX[d]));
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const out = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dt = new Date(year, month, day);
+    if (wanted.has(dt.getDay())) out.push(dt);
+  }
+  return out;
+}
+function attendanceStats(student, groupId) {
+  const log = (student.attendanceLog || []).filter((r) => r.groupId === groupId);
+  const total = log.length;
+  const present = log.filter((r) => r.present).length;
+  return { total, present, pct: total ? Math.round((present / total) * 100) : null };
+}
+function monthlyCharge(group, student, year, month) {
+  const totalLessons = countLessonsInMonth(group.days, year, month, 1);
+  if (totalLessons === 0) return { amount: 0, lessons: 0 };
+  const pricePerLesson = group.price / totalLessons;
+  const joined = student.joinedAt ? new Date(student.joinedAt) : null;
+  const fromDay = (joined && joined.getFullYear() === year && joined.getMonth() === month) ? joined.getDate() : 1;
+  const scheduledLessons = countLessonsInMonth(group.days, year, month, fromDay);
+  const excusedCount = (student.attendanceLog || []).filter((r) => {
+    if (r.present !== false || !r.excused) return false;
+    const d = new Date(r.date);
+    return d.getFullYear() === year && d.getMonth() === month && d.getDate() >= fromDay;
+  }).length;
+  const billableLessons = Math.max(0, scheduledLessons - excusedCount);
+  const discountPct = student.discount || 0;
+  const gross = pricePerLesson * billableLessons;
+  return { amount: Math.round(gross * (1 - discountPct / 100)), lessons: billableLessons, discountPct };
+}
+
+const COURSE_COLORS = {
+  "Английский язык": "#B91C1C", "Немецкий язык": "#B45309", "Русский язык": "#1D4ED8",
+  "Узбекский язык": "#15803D", "Корейский язык": "#7E22CE", "Китайский язык": "#C2410C",
+};
+const FALLBACK_COURSE_PALETTE = ["#0F766E", "#9333EA", "#0369A1", "#B45309", "#4D7C0F", "#BE185D"];
+function courseColor(course) {
+  if (COURSE_COLORS[course]) return COURSE_COLORS[course];
+  let hash = 0;
+  for (let i = 0; i < (course || "").length; i++) hash = (hash * 31 + course.charCodeAt(i)) >>> 0;
+  return FALLBACK_COURSE_PALETTE[hash % FALLBACK_COURSE_PALETTE.length];
+}
+function CourseDot({ course }) {
+  return <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: courseColor(course) }} />;
+}
+
+/* -------------------------------- UI-атомы -------------------------------- */
+const inputCls = "w-full text-[13.5px] px-3 py-2.5 rounded-xl bg-[#FAFAF7] outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(220,38,38,0.12)]";
+const inputStyle = { border: `1px solid ${LINE}` };
+
+function Card({ children, className = "", hover }) {
+  return (
+    <div className={`card-surface bg-white rounded-2xl ${hover ? "transition-shadow hover:shadow-md" : ""} ${className}`} style={{ border: `1px solid ${LINE}` }}>
+      {children}
+    </div>
+  );
+}
+function PrimaryBtn({ children, onClick, type = "button", full, disabled }) {
+  return (
+    <button type={type} onClick={onClick} disabled={disabled} className={`flex items-center justify-center gap-1.5 text-[13px] font-medium px-4 py-2.5 rounded-full text-white ${full ? "w-full" : ""}`} style={{ background: TEAL, opacity: disabled ? 0.6 : 1, cursor: disabled ? "default" : "pointer" }}>
+      {children}
+    </button>
+  );
+}
+function IconBtn({ icon: Icon, onClick, label, disabled }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} title={label} aria-label={label} className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: "#EEEEE8", color: "#5B5B54", opacity: disabled ? 0.4 : 1 }}>
+      <Icon size={15} />
+    </button>
+  );
+}
+function EmptyState({ text }) {
+  return <div className="py-8 text-center text-[13px] opacity-45">{text}</div>;
+}
+function Pill({ children, tone = "teal" }) {
+  const map = { teal: ["#FEE2E2", TEAL_D], gold: ["#FEF9C3", "#854D0E"], brick: ["#FFEDD5", BRICK], green: ["#DCFCE7", GREEN_D] };
+  const [bg, fg] = map[tone] || map.teal;
+  return <span className="text-[11.5px] font-medium px-2.5 py-1 rounded-full" style={{ background: bg, color: fg }}>{children}</span>;
+}
+function Field({ label, children }) {
+  return <label className="block"><span className="text-[12px] opacity-50 block mb-1.5">{label}</span>{children}</label>;
+}
+function Row({ label, value }) {
+  return <div className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${LINE}` }}><span className="opacity-50">{label}</span><span className="font-medium">{value}</span></div>;
+}
+function Modal({ title, onClose, children, wide, huge }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/40 anim-fade" onClick={onClose} />
+      <div className={`anim-pop relative bg-white rounded-2xl shadow-2xl w-full ${huge ? "max-w-6xl" : wide ? "max-w-4xl" : "max-w-sm"} p-6 ${huge ? "h-[94vh]" : "max-h-[92vh]"} overflow-y-auto`}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="disp text-[17px] font-semibold">{title}</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "#EEEEE8" }}><X size={16} /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------- Таблица посещаемости ----------------------------- */
+function AttendanceTable({ group, students, onMark, onMarkAll, onGrade, t, lang }) {
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  const [viewDate, setViewDate] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
+  const year = viewDate.getFullYear(), month = viewDate.getMonth();
+  const createdAt = group.createdAt ? new Date(group.createdAt) : null;
+  const dates = lessonDatesInMonth(group.days, year, month).filter((d) => !createdAt || d >= new Date(createdAt.getFullYear(), createdAt.getMonth(), createdAt.getDate()));
+  const dateInfo = dates.map((d) => ({ d, str: toDateKey(d) }));
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
+  const changeMonth = (delta) => setViewDate(new Date(year, month + delta, 1));
+  const studentIds = students.map((s) => s.id);
+  const [gradePicker, setGradePicker] = useState(null); // { studentId, studentName, dateStr, dateLabel, current }
+
+  if (students.length === 0) return <EmptyState text={t("add_students_first")} />;
+
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-2.5">
+        <IconBtn icon={ChevronLeft} label={t("prev_month")} onClick={() => changeMonth(-1)} />
+        {!isCurrentMonth && (
+          <button onClick={() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); setViewDate(d); }} className="text-[11.5px] font-medium px-2.5 py-1 rounded-full" style={{ background: "var(--soft-purple-bg)", color: TEAL_D }}>{t("current_month_btn")}</button>
+        )}
+        <span className="text-[13px] font-medium capitalize">{viewDate.toLocaleDateString(locale, { month: "long", year: "numeric" })}</span>
+        <IconBtn icon={ChevronRight} label={t("next_month")} onClick={() => changeMonth(1)} />
+      </div>
+      <div className="flex flex-wrap items-center gap-3 mb-2.5 text-[11px]">
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full inline-block" style={{ background: "var(--surface-alt)" }} /> — {t("legend_no_mark")}</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full inline-block" style={{ background: "var(--soft-green-bg, #DCFCE7)" }} /> {t("legend_present")}</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full inline-block" style={{ background: "#FFEDD5" }} /> {t("legend_absent")}</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full inline-block" style={{ background: "#DBEAFE" }} /> {t("legend_excused")}</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full inline-block" style={{ background: "var(--surface)", border: `1px solid ${LINE}` }} /> {t("legend_future")}</span>
+      </div>
+      <p className="text-[11px] opacity-40 mb-2">{t("grade_hint")}</p>
+      {dateInfo.length === 0 ? <EmptyState text={t("no_lessons_month")} /> : (
+        <div className="overflow-x-auto rounded-xl" style={{ border: `1px solid ${LINE}`, maxHeight: "70vh", overflowY: "auto" }}>
+          <table className="text-[12px] border-collapse">
+            <thead>
+              <tr>
+                <th className="sticky left-0 top-0 text-left px-3 py-2 font-medium z-10" style={{ borderBottom: `1px solid ${LINE}`, borderRight: `1px solid ${LINE}`, background: "var(--surface)" }}>{t("name_col")}</th>
+                {dateInfo.map(({ d, str }) => {
+                  const future = d > today;
+                  return (
+                    <th key={str} className="sticky top-0 px-1.5 py-1.5 font-medium text-center whitespace-nowrap" style={{ borderBottom: `1px solid ${LINE}`, color: d.toDateString() === today.toDateString() ? TEAL : INK, background: "var(--surface)" }}>
+                      <div>{d.getDate()} {d.toLocaleDateString(locale, { month: "short" })}</div>
+                      {!future && (
+                        <button onClick={() => onMarkAll(studentIds, str, true, group.id)} title={t("mark_all_tooltip")} className="mt-0.5 text-[9.5px] font-medium px-1.5 py-0.5 rounded-full" style={{ background: "var(--soft-green-bg, #DCFCE7)", color: GREEN_D }}>
+                          {t("mark_all_short")}
+                        </button>
+                      )}
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {students.map((s) => {
+                const logMap = new Map((s.attendanceLog || []).filter((r) => r.groupId === group.id).map((r) => [r.date, r]));
+                return (
+                <tr key={s.id}>
+                  <td className="sticky left-0 px-3 py-1.5 font-medium truncate max-w-[140px]" style={{ borderRight: `1px solid ${LINE}`, borderTop: `1px solid ${LINE}`, background: "var(--surface)" }}>{s.name}</td>
+                  {dateInfo.map(({ d, str: dateStr }) => {
+                    const rec = logMap.get(dateStr);
+                    const future = d > today;
+                    let bg = "var(--surface-alt)", fg = "var(--ink)", label = "—";
+                    if (rec) {
+                      if (rec.present) { bg = "var(--soft-green-bg, #DCFCE7)"; fg = GREEN_D; label = t("present_label"); }
+                      else if (rec.excused) { bg = "#DBEAFE"; fg = "#1D4ED8"; label = t("excused_short"); }
+                      else { bg = "#FFEDD5"; fg = BRICK; label = t("absent_label"); }
+                    }
+                    if (future) { bg = "var(--surface)"; fg = "#C9C6BA"; label = "·"; }
+                    const grade = rec?.grade;
+                    const gradeColors = { 1: BRICK, 2: "#EA580C", 3: "#CA8A04", 4: "#65A30D", 5: GREEN_D };
+                    return (
+                      <td key={dateStr} className="px-1.5 py-1.5 text-center" style={{ borderTop: `1px solid ${LINE}` }}>
+                        <button
+                          disabled={future}
+                          onClick={() => onMark(s.id, dateStr, group.id)}
+                          title={t("mark_click_hint")}
+                          className="w-14 py-1 rounded-full text-[10.5px] font-medium"
+                          style={{ background: bg, color: fg, cursor: future ? "default" : "pointer" }}
+                        >
+                          {label}
+                        </button>
+                        {!future && (
+                          <button
+                            onClick={() => setGradePicker({ studentId: s.id, studentName: s.name, dateStr, dateLabel: `${d.getDate()} ${d.toLocaleDateString(locale, { month: "long" })}`, current: grade || null })}
+                            title={t("grade_tooltip")}
+                            className="mt-1 w-14 py-0.5 rounded-full text-[10px] font-semibold"
+                            style={{ background: grade ? gradeColors[grade] : "var(--surface-soft)", color: grade ? "#fff" : "#B0AFA4" }}
+                          >
+                            {grade || t("grade_short")}
+                          </button>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );})}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {gradePicker && (
+        <Modal title={t("grade_title", { name: gradePicker.studentName })} onClose={() => setGradePicker(null)}>
+          <p className="text-[12.5px] opacity-50 mb-3">{gradePicker.dateLabel}</p>
+          <div className="grid grid-cols-5 gap-2">
+            {[1, 2, 3, 4, 5].map((n) => {
+              const gradeColors = { 1: BRICK, 2: "#EA580C", 3: "#CA8A04", 4: "#65A30D", 5: GREEN_D };
+              const active = gradePicker.current === n;
+              return (
+                <button
+                  key={n}
+                  onClick={() => { onGrade(gradePicker.studentId, gradePicker.dateStr, group.id, n); setGradePicker(null); }}
+                  className="aspect-square rounded-xl text-[20px] font-semibold flex items-center justify-center"
+                  style={{ background: active ? gradeColors[n] : "var(--surface-soft)", color: active ? "#fff" : INK, border: active ? "none" : `1px solid ${LINE}` }}
+                >
+                  {n}
+                </button>
+              );
+            })}
+          </div>
+          {gradePicker.current && (
+            <button onClick={() => { onGrade(gradePicker.studentId, gradePicker.dateStr, group.id, null); setGradePicker(null); }} className="w-full mt-3 text-[12.5px] font-medium py-2.5 rounded-full" style={{ background: "var(--surface-alt)", color: "var(--ink)" }}>
+              {t("remove_grade")}
+            </button>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ----------------------------- Материалы к уроку ----------------------------- */
+function MaterialsSection({ db, group, onSave, onDelete, t, lang }) {
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  const now = new Date();
+  const monthDates = lessonDatesInMonth(group.days, now.getFullYear(), now.getMonth());
+  const [dateStr, setDateStr] = useState(() => toDateKey(now));
+  const [text, setText] = useState("");
+  const [link, setLink] = useState("");
+  const materials = (db.lessonMaterials || []).filter((m) => m.groupId === group.id).sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  const save = () => {
+    if (!text.trim() && !link.trim()) return;
+    onSave({ groupId: group.id, date: dateStr, text: text.trim(), link: link.trim() });
+    setText(""); setLink("");
+  };
+
+  return (
+    <div>
+      <h4 className="text-[13px] font-semibold mb-2">{t("materials_title")}</h4>
+      <div className="p-3 rounded-xl space-y-2" style={{ background: "var(--surface-soft)" }}>
+        <div className="flex gap-2 flex-wrap">
+          <select className="text-[12.5px] px-2.5 py-2 rounded-lg" style={{ ...inputStyle, background: "var(--surface)" }} value={dateStr} onChange={(e) => setDateStr(e.target.value)}>
+            {monthDates.map((d) => { const key = toDateKey(d); return <option key={key} value={key}>{d.toLocaleDateString(locale, { day: "2-digit", month: "long" })}</option>; })}
+          </select>
+        </div>
+        <textarea rows={2} className="w-full text-[12.5px] px-3 py-2 rounded-lg outline-none" style={{ ...inputStyle, background: "var(--surface)" }} value={text} onChange={(e) => setText(e.target.value)} placeholder={t("material_text_placeholder")} />
+        <input className="w-full text-[12.5px] px-3 py-2 rounded-lg outline-none" style={{ ...inputStyle, background: "var(--surface)" }} value={link} onChange={(e) => setLink(e.target.value)} placeholder={t("material_link_placeholder")} />
+        <button onClick={save} className="text-[12px] font-medium px-3.5 py-2 rounded-full text-white" style={{ background: TEAL }}>{t("save")}</button>
+      </div>
+      {materials.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {materials.map((m) => (
+            <div key={m.id} className="p-2.5 rounded-xl flex items-start justify-between gap-2" style={{ border: `1px solid ${LINE}` }}>
+              <div className="min-w-0">
+                <div className="text-[11.5px] font-medium opacity-60">{new Date(m.date).toLocaleDateString(locale, { day: "2-digit", month: "long" })}</div>
+                {m.text && <div className="text-[12.5px] mt-0.5">{m.text}</div>}
+                {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12px] mt-0.5 block truncate" style={{ color: TEAL_D }}>{m.link}</a>}
+              </div>
+              <button onClick={() => onDelete(m.id)} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }}><X size={13} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ----------------------------- Журнал группы (для учителя) ----------------------------- */
+function GroupJournalModal({ group, db, onClose, onMark, onMarkAll, onAward, onGrade, onSaveMaterial, onDeleteMaterial, t, lang }) {
+  const students = db.students.filter((s) => s.groupId === group.id);
+  const [coinAmounts, setCoinAmounts] = useState({});
+
+  return (
+    <Modal title={t("journal_title", { name: group.name })} onClose={onClose} huge>
+      <div className="space-y-4">
+        {group.curriculum && (
+          <div className="p-3 rounded-xl text-[12.5px] flex items-start gap-2" style={{ background: "var(--surface-soft)" }}>
+            <span className="opacity-70">{group.curriculum}</span>
+          </div>
+        )}
+        <div>
+          <h4 className="text-[13px] font-semibold mb-2">{t("attendance_grades")}</h4>
+          <AttendanceTable group={group} students={students} onMark={onMark} onMarkAll={onMarkAll} onGrade={onGrade} t={t} lang={lang} />
+        </div>
+        <MaterialsSection db={db} group={group} onSave={onSaveMaterial} onDelete={onDeleteMaterial} t={t} lang={lang} />
+        <div>
+          <h4 className="text-[13px] font-semibold mb-2">{t("group_composition")}</h4>
+          <div className="space-y-2">
+            {students.length === 0 && <EmptyState text={t("no_students_in_group")} />}
+            {students.map((s) => (
+              <div key={s.id} className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ border: `1px solid ${LINE}` }}>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-medium truncate flex items-center gap-1.5">
+                    {s.name}
+                    {s.debt > 0
+                      ? <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full" style={{ background: "#FFEDD5", color: BRICK }}>{t("unpaid_month")}</span>
+                      : <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full" style={{ background: "var(--soft-green-bg, #DCFCE7)", color: GREEN_D }}>{t("paid_status")}</span>}
+                  </div>
+                  <div className="text-[11px] opacity-45 flex items-center gap-1"><Coins size={11} /> {s.coins} GC</div>
+                </div>
+                <input type="number" min={0} max={25} value={coinAmounts[s.id] || ""} onChange={(e) => setCoinAmounts({ ...coinAmounts, [s.id]: e.target.value })} placeholder="GC" className="w-14 text-[12px] px-2 py-1.5 rounded-lg" style={{ ...inputStyle, background: "var(--surface)" }} />
+                <button onClick={() => { onAward(s.id, coinAmounts[s.id]); setCoinAmounts({ ...coinAmounts, [s.id]: "" }); }} className="text-[11px] font-medium px-2 py-1.5 rounded-full" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}>+GC</button>
+              </div>
+            ))}
+          </div>
+        </div>
+        <p className="text-[11px] opacity-40">{t("journal_footer_note")}</p>
+      </div>
+    </Modal>
+  );
+}
+
+/* ----------------------------- Моя зарплата ----------------------------- */
+function computeMySalary(db, teacher, t, locale) {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const tGroups = db.groups.filter((g) => g.teacherId === teacher.id);
+  const rows = tGroups.map((g) => {
+    const totalLessons = countLessonsInMonth(g.days, y, m, 1);
+    const students = db.students.filter((s) => s.groupId === g.id);
+    const revenue = students.reduce((sum, s) => {
+      if (!totalLessons) return sum;
+      const joined = s.joinedAt ? new Date(s.joinedAt) : null;
+      const fromDay = (joined && joined.getFullYear() === y && joined.getMonth() === m) ? joined.getDate() : 1;
+      const lessonsForStudent = countLessonsInMonth(g.days, y, m, fromDay);
+      return sum + g.price * (lessonsForStudent / totalLessons);
+    }, 0);
+    return { group: g, students: students.length, totalLessons, revenue };
+  });
+  const totalRevenue = rows.reduce((a, r) => a + r.revenue, 0);
+  let salary = 0, label = "";
+  if (teacher.rateType === "fixed") { salary = teacher.rateValue; label = t("fixed_rate"); }
+  else if (teacher.rateType === "percent") { salary = Math.round(totalRevenue * (teacher.rateValue / 100)); label = t("percent_rate", { pct: teacher.rateValue }); }
+  else { salary = Math.round(totalRevenue * (teacher.rateValue / 100)) + 200000; label = t("percent_bonus_rate", { pct: teacher.rateValue }); }
+  const monthKey = monthKeyOf(y, m);
+  const advance = (db.advances || []).filter((a) => a.teacherId === teacher.id && a.month === monthKey).reduce((s, a) => s + a.amount, 0);
+  const alreadyPaid = (db.payrollHistory || []).filter((p) => p.teacherId === teacher.id && p.month === monthKey).reduce((s, p) => s + p.net, 0);
+  const net = Math.max(0, salary - advance - alreadyPaid);
+  return { rows, totalRevenue, salary, label, advance, alreadyPaid, net, periodLabel: now.toLocaleDateString(locale || "ru-RU", { month: "long", year: "numeric" }) };
+}
+function SalaryModal({ db, teacher, onClose, t, lang }) {
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  const s = computeMySalary(db, teacher, t, locale);
+  return (
+    <Modal title={t("salary_title")} onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-[12px] opacity-45 capitalize">{s.periodLabel}</p>
+        <div className="space-y-2">
+          {s.rows.length === 0 && <p className="text-[12.5px] opacity-45">{t("no_groups_period")}</p>}
+          {s.rows.map((r) => (
+            <div key={r.group.id} className="p-2.5 rounded-lg" style={{ background: "var(--surface-soft)" }}>
+              <div className="flex items-center justify-between text-[13px] font-medium"><span>{r.group.name}</span><span className="mono">{fmt(Math.round(r.revenue))} {lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}</span></div>
+              <div className="text-[11.5px] opacity-50 mt-0.5">{r.students} {t("students_short")} · {r.totalLessons} {t("lessons_month_short")}</div>
+            </div>
+          ))}
+        </div>
+        <Row label={t("revenue_total")} value={`${fmt(Math.round(s.totalRevenue))} ${lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}`} />
+        <Row label={t("formula_label")} value={s.label} />
+        {s.advance > 0 && <Row label={t("advance_given")} value={`− ${fmt(s.advance)} ${lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}`} />}
+        {s.alreadyPaid > 0 && <Row label={t("already_paid_label")} value={`− ${fmt(s.alreadyPaid)} ${lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}`} />}
+        <div className="flex items-center justify-between pt-2" style={{ borderTop: `1px solid ${LINE}` }}>
+          <span className="text-[13px] font-semibold">{t("remainder_to_pay")}</span>
+          <span className="disp text-[20px] font-semibold">{fmt(s.net)} {lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}</span>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ----------------------------- Главный кабинет учителя ----------------------------- */
+function AnnouncementModal({ myGroups, myTeacherName, onClose, onSend, t }) {
+  const [text, setText] = useState("");
+  const [targetGroupId, setTargetGroupId] = useState("");
+  const [urgent, setUrgent] = useState(false);
+  return (
+    <Modal title={t("announcement_title")} onClose={onClose}>
+      <p className="text-[12px] opacity-50 mb-3">{t("announcement_hint")}</p>
+      <div className="mb-3">
+        <label className="text-[12px] opacity-50 block mb-1.5">{t("announcement_target")}</label>
+        <select value={targetGroupId} onChange={(e) => setTargetGroupId(e.target.value)} className="w-full text-[13.5px] px-3.5 py-2.5 rounded-xl outline-none" style={{ border: `1px solid ${LINE}`, background: "var(--surface-soft)" }}>
+          <option value="">{t("announcement_all")}</option>
+          {myGroups.map((g) => <option key={g.id} value={g.id}>{t("announcement_only_group", { name: g.name })}</option>)}
+        </select>
+      </div>
+      <textarea
+        rows={3}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={t("announcement_text_placeholder")}
+        className="w-full text-[13.5px] px-3.5 py-2.5 rounded-xl outline-none"
+        style={{ border: `1px solid ${LINE}`, background: "var(--surface-soft)" }}
+      />
+      <label className="flex items-center gap-2 mt-3 text-[12.5px] cursor-pointer">
+        <input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} />
+        {t("announcement_urgent")}
+      </label>
+      <button
+        onClick={() => { if (text.trim()) onSend({ text: text.trim(), groupId: targetGroupId || null, urgent, senderName: myTeacherName }); }}
+        disabled={!text.trim()}
+        className="w-full mt-3.5 text-[13.5px] font-medium py-2.5 rounded-full text-white"
+        style={{ background: TEAL, opacity: text.trim() ? 1 : 0.5 }}
+      >
+        {t("send")}
+      </button>
+    </Modal>
+  );
+}
+
+function TeacherPortal({ db, onAction, notify, myTeacher, t, lang }) {
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  const [journalGroup, setJournalGroup] = useState(null);
+  const [showSalary, setShowSalary] = useState(false);
+  const myGroups = db.groups;
+
+  const markAttendanceDate = (studentId, dateStr, groupId) => {
+    onAction("markAttendance", { studentId, dateStr, groupId });
+  };
+  const markAllAttendance = (studentIds, dateStr, present, groupId) => {
+    onAction("markAllAttendance", { studentIds, dateStr, present, groupId });
+    notify(`✓ ${ruDate(dateStr, locale)}`);
+  };
+  const setGrade = (studentId, dateStr, groupId, value) => {
+    onAction("setGrade", { studentId, dateStr, groupId, value });
+  };
+  const saveMaterial = (material) => {
+    onAction("saveMaterial", material);
+    notify(t("save"));
+  };
+  const deleteMaterial = (id) => {
+    onAction("deleteMaterial", { materialId: id });
+    notify(t("delete"), "gold");
+  };
+  const awardCoins = (studentId, amount) => {
+    const capped = Math.max(0, Math.min(25, Number(amount) || 0));
+    if (capped <= 0) return;
+    onAction("awardCoins", { studentId, amount: capped });
+    notify(`+${capped} GlobalCoins`);
+  };
+
+  const [section, setSection] = useState("groups");
+  const [showAnnouncement, setShowAnnouncement] = useState(false);
+  const myGroupIds = myGroups.map((g) => g.id);
+  const myStudents = db.students;
+  const ranking = myStudents.map((s) => {
+    const myLog = (s.attendanceLog || []).filter((r) => myGroupIds.includes(r.groupId));
+    const grades = myLog.filter((r) => r.grade).map((r) => r.grade);
+    const avgGrade = grades.length ? grades.reduce((a, b) => a + b, 0) / grades.length : null;
+    const total = myLog.length, present = myLog.filter((r) => r.present).length;
+    const pct = total ? Math.round((present / total) * 100) : null;
+    const group = myGroups.find((g) => g.id === s.groupId);
+    return { student: s, group, avgGrade, pct };
+  }).sort((a, b) => (b.avgGrade || 0) - (a.avgGrade || 0));
+
+  const myNotifications = db.notifications || [];
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-4">
+      {myNotifications.length > 0 && (
+        <div className="space-y-2">
+          {myNotifications.map((n) => (
+            <div key={n.id} className="rounded-2xl p-3.5 flex items-start gap-2.5" style={{ background: n.urgent ? `linear-gradient(135deg, ${TEAL}, ${TEAL_D})` : "var(--soft-yellow-bg)", color: n.urgent ? "#fff" : "var(--soft-yellow-fg)" }}>
+              <span className="text-[16px] leading-none">{n.urgent ? "🔴" : "📣"}</span>
+              <div className="min-w-0">
+                <p className="text-[13px] font-medium leading-snug">{n.text}</p>
+                <p className="text-[10.5px] opacity-75 mt-0.5">{n.senderName} · {new Date(n.date).toLocaleDateString(locale, { day: "2-digit", month: "short" })}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="disp text-[20px] font-semibold">{t("hello", { name: myTeacher.name })}</h2>
+          <p className="text-[13px] opacity-55 mt-1">{myTeacher.subject} · {myGroups.length} {myGroups.length === 1 ? t("group_word_one") : t("group_word_few")}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowAnnouncement(true)} className="text-[12.5px] font-medium px-4 py-2 rounded-full" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}>📣 {t("notification_btn")}</button>
+          <button onClick={() => setShowSalary(true)} className="text-[12.5px] font-medium px-4 py-2 rounded-full" style={{ background: "var(--soft-purple-bg)", color: TEAL_D }}>{t("salary_btn")}</button>
+        </div>
+      </div>
+      {showAnnouncement && (
+        <AnnouncementModal
+          myGroups={myGroups}
+          myTeacherName={myTeacher.name}
+          t={t}
+          onClose={() => setShowAnnouncement(false)}
+          onSend={(n) => {
+            onAction("sendNotification", n);
+            notify(t("send"));
+            setShowAnnouncement(false);
+          }}
+        />
+      )}
+
+      <div className="flex gap-1.5">
+        {[["groups", t("tab_groups")], ["schedule", t("tab_schedule")], ["ranking", t("tab_ranking")]].map(([key, label]) => (
+          <button key={key} onClick={() => setSection(key)} className="text-[12.5px] font-medium px-3.5 py-1.5 rounded-full" style={{ background: section === key ? TEAL : "var(--surface-alt)", color: section === key ? "#fff" : "var(--ink)" }}>{label}</button>
+        ))}
+      </div>
+
+      {section === "groups" && (
+        myGroups.length === 0 ? (
+          <EmptyState text={t("no_groups_assigned")} />
+        ) : (
+          <div className="space-y-3">
+            {myGroups.map((g) => {
+              const count = db.students.filter((s) => s.groupId === g.id).length;
+              const daysLeft = g.courseEndDate ? Math.ceil((new Date(g.courseEndDate) - new Date()) / 86400000) : null;
+              return (
+                <Card key={g.id} className="p-5">
+                  <div className="flex items-start justify-between flex-wrap gap-2">
+                    <div>
+                      <h3 className="disp text-[16px] font-semibold flex items-center gap-1.5"><CourseDot course={g.course} />{g.name}</h3>
+                      <p className="text-[12.5px] opacity-55 mt-0.5">{g.course} · {scheduleText(g, t("no_schedule"))} · {g.room}</p>
+                    </div>
+                    <Pill tone="teal">{count}/{g.capacity} {t("students_suffix")}</Pill>
+                  </div>
+                  {daysLeft !== null && <p className="text-[11.5px] mt-2" style={{ color: daysLeft <= 14 ? BRICK : undefined, opacity: daysLeft <= 14 ? 1 : 0.5 }}>{daysLeft > 0 ? t("days_left", { n: daysLeft }) : t("course_finished")}</p>}
+                  <button onClick={() => setJournalGroup(g)} className="mt-3 w-full text-[13.5px] font-medium py-2.5 px-4 rounded-full text-white" style={{ background: TEAL }}>{t("mark_attendance_btn")}</button>
+                </Card>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {section === "schedule" && (
+        myGroups.length === 0 ? (
+          <EmptyState text={t("no_groups_schedule")} />
+        ) : (
+          <div className="space-y-3">
+            {DAYS.map((day) => {
+              const todayName = DAYS[(new Date().getDay() + 6) % 7];
+              const dayGroups = myGroups.filter((g) => (g.days || []).includes(day)).sort((a, b) => a.start.localeCompare(b.start));
+              const isToday = day === todayName;
+              return (
+                <Card key={day} className="p-4" style={isToday ? { border: `1.5px solid ${TEAL}` } : {}}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="disp text-[14px] font-semibold">{dayLabel(day, lang)}</span>
+                    {isToday && <Pill tone="teal">{t("today_pill")}</Pill>}
+                  </div>
+                  {dayGroups.length === 0 ? (
+                    <p className="text-[12px] opacity-40">{t("no_lessons")}</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {dayGroups.map((g) => (
+                        <div key={g.id} className="flex items-center justify-between text-[12.5px] px-2.5 py-2 rounded-lg" style={{ background: "var(--surface-soft)" }}>
+                          <span className="flex items-center gap-1.5"><CourseDot course={g.course} />{g.name}</span>
+                          <span className="opacity-55">{g.start}–{g.end} · {g.room}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {section === "ranking" && (
+        ranking.length === 0 ? (
+          <EmptyState text={t("no_students_ranking")} />
+        ) : (
+          <Card className="p-4">
+            <div className="space-y-1.5">
+              {ranking.map((r, i) => (
+                <div key={r.student.id} className="flex items-center gap-3 px-2.5 py-2 rounded-lg" style={{ background: i < 3 ? "var(--soft-yellow-bg)" : "var(--surface-soft)" }}>
+                  <span className="text-[13px] font-semibold w-5 text-center opacity-60">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-medium truncate">{r.student.name}</div>
+                    <div className="text-[11px] opacity-50">{r.group?.name || "—"}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-[13px] font-semibold" style={{ color: r.avgGrade === null ? "#B0AFA4" : r.avgGrade >= 4.5 ? GREEN_D : r.avgGrade >= 3.5 ? "#CA8A04" : BRICK }}>{r.avgGrade === null ? "—" : r.avgGrade.toFixed(1)}</div>
+                    <div className="text-[10.5px] opacity-45">{r.pct === null ? "" : t("attendance_pct", { pct: r.pct })}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )
+      )}
+
+      {journalGroup && (
+        <GroupJournalModal
+          group={journalGroup}
+          db={db}
+          t={t}
+          lang={lang}
+          onClose={() => setJournalGroup(null)}
+          onMark={markAttendanceDate}
+          onMarkAll={markAllAttendance}
+          onAward={awardCoins}
+          onGrade={setGrade}
+          onSaveMaterial={saveMaterial}
+          onDeleteMaterial={deleteMaterial}
+        />
+      )}
+      {showSalary && <SalaryModal db={db} teacher={myTeacher} onClose={() => setShowSalary(false)} t={t} lang={lang} />}
+    </div>
+  );
+}
+
+/* -------------------------------- Экран входа -------------------------------- */
 function formatUzPhone(digits) {
   let out = "";
   if (digits.length > 0) out += digits.slice(0, 2);
@@ -68,20 +960,79 @@ function formatUzPhone(digits) {
   if (digits.length > 7) out += " " + digits.slice(7, 9);
   return out;
 }
-const ruDate = (iso, locale = "ru-RU") => new Date(iso).toLocaleDateString(locale, { day: "2-digit", month: "short" });
-const scheduleText = (g, fallback = "не задано") => (g?.days && g.days.length ? `${g.days.join("/")} · ${g.start}–${g.end}` : fallback);
-const initials = (name) => (name || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+function LoginScreen({ phone, setPhone, password, setPassword, onLogin, loading, error, t, lang, changeLang, theme, changeTheme }) {
+  const phoneDigits = phone.replace(/[^0-9]/g, "").replace(/^998/, "").slice(0, 9);
+  return (
+    <div className={`theme-${theme} app-bg min-h-screen w-full flex items-center justify-center p-4`} style={{ fontFamily: "'Inter', sans-serif", background: PAPER }}>
+      <style>{FONT_IMPORT}</style>
+      <style>{THEME_VARS}</style>
+      <div className="w-full max-w-sm">
+        <div className="flex items-center justify-center gap-2.5 mb-5">
+          <div className="flex items-center gap-0.5 p-1 rounded-full" style={{ background: "var(--surface-alt)" }}>
+            {["ru", "en", "uz"].map((l) => (
+              <button key={l} onClick={() => changeLang(l)} className="w-9 h-9 rounded-full flex items-center justify-center text-[16px] transition-all duration-150" style={{ background: lang === l ? "var(--surface)" : "transparent", boxShadow: lang === l ? "0 2px 6px rgba(0,0,0,0.14)" : "none", transform: lang === l ? "scale(1.08)" : "scale(1)" }}>
+                {LANG_FLAGS[l]}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => changeTheme(theme === "light" ? "dark" : "light")} className="w-9 h-9 rounded-full flex items-center justify-center text-[15px]" style={{ background: "var(--surface-alt)" }}>
+            {theme === "light" ? "🌙" : "☀️"}
+          </button>
+        </div>
+        <div className="card-surface rounded-2xl w-full p-7" style={{ border: `1px solid ${LINE}`, background: "var(--surface)", color: INK }}>
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--soft-yellow-bg)", boxShadow: "0 0 0 3px rgba(19,36,54,0.05)" }}>
+              <span className="disp text-[14px] font-semibold" style={{ color: TEAL_D }}>GU</span>
+            </div>
+            <div>
+              <div className="disp text-[18px] font-semibold leading-none">{t("login_title")}</div>
+              <div className="text-[11px] opacity-45 mt-1">{t("login_subtitle")}</div>
+            </div>
+          </div>
+          <form onSubmit={(e) => { e.preventDefault(); onLogin(); }} className="space-y-3.5">
+            <Field label={t("phone_label")}>
+              <div className="flex items-center gap-1.5">
+                <span className="shrink-0 px-3 py-2.5 rounded-lg text-[13px] font-medium" style={{ background: "var(--surface-alt)", border: `1px solid ${LINE}` }}>+998</span>
+                <input
+                  inputMode="numeric"
+                  className={inputCls}
+                  style={inputStyle}
+                  value={formatUzPhone(phoneDigits)}
+                  onChange={(e) => setPhone("+998 " + formatUzPhone(e.target.value.replace(/[^0-9]/g, "").slice(0, 9)))}
+                  placeholder="90 123 45 67"
+                  autoFocus
+                />
+              </div>
+            </Field>
+            <Field label={t("password_label")}>
+              <input type="password" className={inputCls} style={inputStyle} value={password} onChange={(e) => setPassword(e.target.value)} />
+            </Field>
+            {error && <p className="text-[12.5px] break-words" style={{ color: BRICK }}>{error}</p>}
+            <PrimaryBtn type="submit" full onClick={onLogin}>
+              {loading ? <Loader2 size={15} className="animate-spin" /> : t("login_btn")}
+            </PrimaryBtn>
+          </form>
+          <p className="text-[11px] opacity-40 mt-4 text-center px-4">{t("login_remember_note")}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-async function fetchMyData(initData, phone, password, redeemItemId, redeemStudentId) {
+/* ----------------------------------- App ----------------------------------- */
+const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/teacher-portal";
+const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
+
+async function callTeacherPortal(phone, password, action, payload) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   let curLang = "ru";
-  try { curLang = localStorage.getItem("gu_lang") || "ru"; } catch {}
+  try { curLang = localStorage.getItem("gu_teacher_lang") || "ru"; } catch {}
   try {
     const res = await fetch(EDGE_FUNCTION_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
-      body: JSON.stringify({ initData, phone, password, redeemItemId, redeemStudentId }),
+      body: JSON.stringify({ phone, password, action, payload }),
       signal: controller.signal,
     });
     return await res.json();
@@ -93,1007 +1044,132 @@ async function fetchMyData(initData, phone, password, redeemItemId, redeemStuden
   }
 }
 
-/* -------------------------------- UI-атомы -------------------------------- */
-function Card({ children, className = "", style = {} }) {
-  return <div className={`rounded-3xl ${className}`} style={{ background: "var(--surface)", boxShadow: "0 1px 3px rgba(26,26,23,0.06), 0 1px 2px rgba(26,26,23,0.04)", ...style }}>{children}</div>;
-}
-function EmptyState({ text, icon: Icon = FileText }) {
-  return (
-    <div className="py-8 text-center">
-      <Icon size={26} className="mx-auto mb-2 opacity-25" />
-      <p className="text-[12.5px] opacity-45">{text}</p>
-    </div>
-  );
-}
-function Avatar({ name, size = 40 }) {
-  const colors = [[RED, RED_D], [BLUE, "#1E40AF"], [PURPLE, "var(--soft-purple-fg)"], [GOLD, "#B45309"], [GREEN, GREEN_D], [BRICK, "#9A3412"]];
-  let hash = 0;
-  for (let i = 0; i < (name || "").length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  const [c1, c2] = colors[hash % colors.length];
-  return (
-    <div className="rounded-full flex items-center justify-center shrink-0 font-bold text-white" style={{ width: size, height: size, background: `linear-gradient(135deg, ${c1}, ${c2})`, fontSize: size * 0.38, boxShadow: `0 0 0 2px var(--surface), 0 1px 4px rgba(0,0,0,0.15)` }}>
-      {initials(name)}
-    </div>
-  );
-}
-
-/* ------------------------------- Главная ------------------------------- */
-function ProgressRing({ pct, size = 108, ringColor }) {
-  const stroke = 11;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const offset = c - (Math.max(0, Math.min(100, pct)) / 100) * c;
-  const color = ringColor || (pct >= 90 ? GREEN_D : pct >= 75 ? GOLD : pct >= 50 ? BRICK : RED_D);
-  return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-        <circle cx={size / 2} cy={size / 2} r={r} stroke="rgba(255,255,255,0.6)" strokeWidth={stroke} fill="none" />
-        <circle cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={stroke} fill="none" strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.6s ease" }} />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-[22px] font-extrabold" style={{ color }}>{pct}%</span>
-      </div>
-    </div>
-  );
-}
-function trendArrow(log) {
-  const N = 5;
-  const recent = log.slice(0, N);
-  const older = log.slice(N, N * 2);
-  if (recent.length < 2 || older.length < 2) return null;
-  const pctOf = (arr) => (arr.length ? arr.filter((r) => r.present).length / arr.length : 0);
-  const diff = pctOf(recent) - pctOf(older);
-  if (diff > 0.05) return "up";
-  if (diff < -0.05) return "down";
-  return "same";
-}
-
-function ProgressCard({ log, generalGrades = [], t }) {
-  const total = log.length;
-  const present = log.filter((r) => r.present).length;
-  const pct = total ? Math.round((present / total) * 100) : 0;
-  let streak = 0;
-  for (const r of log) { if (r.present) streak++; else break; }
-
-  // Светофор: красный / жёлтый / зелёный — понятно с одного взгляда
-  const zone = total === 0 ? "none" : pct >= 90 ? "green" : pct >= 60 ? "yellow" : "red";
-  const zoneColors = {
-    green: { bg: "var(--soft-green-bg)", ring: GREEN_D, text: "var(--soft-green-fg)", label: t("progress_great") },
-    yellow: { bg: "var(--soft-yellow-bg)", ring: GOLD, text: "var(--soft-yellow-fg)", label: t("progress_ok") },
-    red: { bg: "var(--soft-red-bg)", ring: RED_D, text: "var(--soft-red-fg)", label: t("progress_bad") },
-    none: { bg: PAPER, ring: "#D1D0C5", text: "#9C9A90", label: t("progress_none") },
-  }[zone];
-
-  const trend = trendArrow(log);
-  const lessonGrades = log.filter((r) => r.grade).map((r) => r.grade);
-  const allGrades = [...lessonGrades, ...generalGrades.map((g) => g.value)];
-  const avgGrade = allGrades.length ? (allGrades.reduce((a, b) => a + b, 0) / allGrades.length).toFixed(1) : null;
-
-  return (
-    <Card className="p-4" style={{ background: zoneColors.bg, border: "none" }}>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-[14.5px] font-bold flex items-center gap-1.5"><TrendingUp size={16} />{t("progress_title")}</h3>
-        {trend && (
-          <span className="flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full" style={{ background: "var(--surface)", color: trend === "up" ? GREEN_D : trend === "down" ? RED_D : "var(--ink)", opacity: trend === "same" ? 0.7 : 1 }}>
-            {trend === "up" ? <TrendingUp size={12} /> : trend === "down" ? <TrendingDown size={12} /> : <Minus size={12} />}
-            {trend === "up" ? t("trend_up") : trend === "down" ? t("trend_down") : t("trend_same")}
-          </span>
-        )}
-      </div>
-      <div className="flex items-center gap-4">
-        <ProgressRing pct={pct} ringColor={zoneColors.ring} />
-        <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-bold leading-snug" style={{ color: zoneColors.text }}>{zoneColors.label}</p>
-          <div className="flex items-center gap-3 mt-2.5 flex-wrap">
-            <div>
-              <div className="text-[17px] font-extrabold leading-none">{present}<span className="text-[11px] font-medium opacity-45">/{total}</span></div>
-              <div className="text-[10px] opacity-45 mt-1">{t("lessons_attended")}</div>
-            </div>
-            {streak > 0 && (
-              <div>
-                <div className="text-[17px] font-extrabold leading-none flex items-center gap-1">{streak} <Flame size={15} style={{ color: BRICK }} /></div>
-                <div className="text-[10px] opacity-45 mt-1">{t("streak_days")}</div>
-              </div>
-            )}
-            {avgGrade && (
-              <div>
-                <div className="text-[17px] font-extrabold leading-none">{avgGrade}</div>
-                <div className="text-[10px] opacity-45 mt-1">{t("avg_grade")}</div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function ConfettiOverlay({ amount, onDone, t }) {
-  useEffect(() => { const timer = setTimeout(onDone, 2800); return () => clearTimeout(timer); }, []);
-  const pieces = useMemo(() => Array.from({ length: 70 }, (_, i) => ({
-    id: i,
-    left: Math.random() * 100,
-    delay: Math.random() * 0.5,
-    duration: 1.8 + Math.random() * 1.4,
-    color: [RED, GOLD, GREEN, BLUE, PURPLE, BRICK][i % 6],
-    rotate: Math.random() * 360,
-    size: 6 + Math.random() * 8,
-  })), []);
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden" style={{ background: "rgba(0,0,0,0.15)" }} onClick={onDone}>
-      {pieces.map((p) => (
-        <div key={p.id} style={{
-          position: "absolute", top: -20, left: `${p.left}%`, width: p.size, height: p.size * 0.4,
-          background: p.color, transform: `rotate(${p.rotate}deg)`,
-          animation: `confettiFall ${p.duration}s ease-in ${p.delay}s forwards`,
-        }} />
-      ))}
-      <div className="anim-pop rounded-3xl px-9 py-8 text-center shadow-2xl mx-6" style={{ background: "var(--surface)" }}>
-        <div className="text-[52px] leading-none">🪙</div>
-        <div className="text-[30px] font-extrabold mt-2" style={{ color: "#B45309" }}>+{amount} GC</div>
-        <div className="text-[13px] opacity-50 mt-1.5">{t ? t("coins_awarded") : "Начислены GlobalCoins!"}</div>
-      </div>
-      <style>{`@keyframes confettiFall { to { transform: translateY(115vh) rotate(720deg); opacity: 0.4; } }`}</style>
-    </div>
-  );
-}
-
-function HomeTab({ student, notifications = [], t, lang }) {
-  const locale = LOCALE_OF[lang] || "ru-RU";
-  const log = [...(student.attendanceLog || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
-  const total = log.length;
-  const present = log.filter((r) => r.present).length;
-  const pct = total ? Math.round((present / total) * 100) : null;
-  const recent = log.slice(0, 8);
-  const materials = [...(student.materials || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
-  const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
-  const hasDebt = (student.debt || 0) > 0;
-  const urgentNotifications = notifications.filter((n) => n.urgent);
-  const normalNotifications = notifications.filter((n) => !n.urgent);
-
-  return (
-    <div className="space-y-3">
-      {urgentNotifications.map((n) => (
-        <div key={n.id} className="rounded-3xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})`, boxShadow: "0 4px 20px rgba(220,38,38,0.35)" }}>
-          <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(255,255,255,0.2)" }}>
-              <Megaphone size={18} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[11px] font-bold uppercase tracking-wide opacity-90">{t("important_notice")}</p>
-              <p className="text-[15px] font-semibold leading-snug mt-1">{n.text}</p>
-              <p className="text-[11px] opacity-75 mt-1.5">{n.senderName} · {ruDate(n.date, locale)}</p>
-            </div>
-          </div>
-        </div>
-      ))}
-      {normalNotifications.length > 0 && (
-        <div className="rounded-3xl p-4 space-y-2.5" style={{ background: "var(--soft-yellow-bg)", border: "1px solid var(--notice-border)" }}>
-          {normalNotifications.map((n) => (
-            <div key={n.id} className="flex items-start gap-2.5">
-              <Megaphone size={18} className="shrink-0 mt-0.5" style={{ color: "#B45309" }} />
-              <div className="min-w-0">
-                <p className="text-[13px] font-medium leading-snug" style={{ color: "var(--soft-yellow-fg)" }}>{n.text}</p>
-                <p className="text-[10.5px] opacity-60 mt-0.5" style={{ color: "var(--soft-yellow-fg)" }}>{n.senderName} · {ruDate(n.date, locale)}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Баланс и GlobalCoins — рядом, в отдельных рамках. Баланс — это всегда конкретное число. */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-3xl p-4 text-white relative overflow-hidden" style={{ background: hasDebt ? `linear-gradient(135deg, ${RED}, ${RED_D})` : `linear-gradient(135deg, ${GREEN}, ${GREEN_D})` }}>
-          <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
-          <Wallet size={19} className="opacity-90" />
-          <p className="text-[10.5px] font-medium opacity-85 uppercase tracking-wide mt-2">{hasDebt ? t("debt") : t("balance")}</p>
-          <div className="text-[16px] font-extrabold mt-0.5 leading-tight">
-            {fmt(hasDebt ? student.debt : (student.prepaidCredit || 0))}
-            <span className="text-[10.5px] font-medium opacity-80 ml-1">{lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}</span>
-          </div>
-          {!hasDebt && (
-            <div className="flex items-center gap-1 mt-1 text-[10.5px] opacity-90">
-              <CheckCircle2 size={12} /> {(student.prepaidCredit || 0) > 0 ? t("debt_credit_note") : t("debt_none")}
-            </div>
-          )}
-        </div>
-        <div className="rounded-3xl p-4 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${GOLD}, #B45309)` }}>
-          <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
-          <CoinsIcon size={19} className="opacity-90" />
-          <p className="text-[10.5px] font-medium opacity-85 uppercase tracking-wide mt-2">{t("coins")}</p>
-          <div className="text-[16px] font-extrabold mt-0.5 leading-tight">{student.coins}<span className="text-[10.5px] font-medium opacity-80 ml-1">GC</span></div>
-        </div>
-      </div>
-      {hasDebt && (student.prepaidCredit || 0) > 0 && (
-        <div className="rounded-2xl p-3 flex items-center gap-2" style={{ background: "var(--soft-green-bg)" }}>
-          <PiggyBank size={16} style={{ color: GREEN_D }} />
-          <p className="text-[12.5px] font-medium" style={{ color: GREEN_D }}>{t("credit_note", { sum: fmt(student.prepaidCredit) })}</p>
-        </div>
-      )}
-
-      <ProgressCard log={log} generalGrades={student.generalGrades || []} t={t} />
-
-      {hasDebt && (
-        <Card className="p-4" style={{ border: `1.5px solid ${RED_L}` }}>
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="text-[13.5px] font-bold flex items-center gap-1.5"><Wallet size={15} style={{ color: RED_D }} /> {t("month_breakdown")}</h3>
-          </div>
-          {student.discount > 0 && (
-            <div className="text-[11.5px] font-semibold mt-1 mb-2 px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}><PartyPopper size={12} /> {t("discount_label", { pct: student.discount })}</div>
-          )}
-          {(student.monthlyDebts || []).length > 0 && (
-            <div className="mt-2 space-y-1.5">
-              {[...student.monthlyDebts].sort((a, b) => a.month.localeCompare(b.month)).map((md) => (
-                <div key={md.month} className="flex items-center justify-between text-[12.5px] px-3 py-2 rounded-xl" style={{ background: PAPER }}>
-                  <span className="capitalize">{new Date(md.month + "-01").toLocaleDateString(locale, { month: "long", year: "numeric" })}</span>
-                  <span className="font-semibold">{fmt(md.amount)} {lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
-
-      {/* Расписание — плашка градиентом */}
-      <div className="rounded-3xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
-        <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
-        <div className="absolute -right-2 bottom-2 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
-        {student.group ? (
-          <>
-            <p className="text-[11px] font-medium opacity-80 uppercase tracking-wide">{student.group.course}</p>
-            <h2 className="text-[19px] font-bold mt-0.5">{student.group.name}</h2>
-            <div className="flex items-center gap-3 mt-3 text-[12.5px]">
-              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}><Calendar size={12} className="inline mr-1 -mt-0.5" />{scheduleText(student.group, t("no_schedule"))}</span>
-              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}><MapPin size={12} className="inline mr-1 -mt-0.5" />{student.group.room}</span>
-            </div>
-            {student.teacherName && <p className="text-[12px] mt-2 opacity-90">{t("teacher_label")}: {student.teacherName}</p>}
-          </>
-        ) : (
-          <p className="text-[13.5px] opacity-90">{t("no_group")}</p>
-        )}
-      </div>
-
-      {/* Посещаемость и оценки */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-[14.5px] font-bold">{t("attendance_grades")}</h3>
-          {pct !== null && (
-            <span className="text-[13px] font-bold px-2.5 py-1 rounded-full" style={{ background: pct >= 90 ? "var(--soft-green-bg)" : pct >= 80 ? "var(--soft-yellow-bg)" : RED_L, color: pct >= 90 ? GREEN_D : pct >= 80 ? "var(--soft-yellow-fg)" : RED_D }}>
-              {pct}%
-            </span>
-          )}
-        </div>
-        {recent.length === 0 ? (
-          <EmptyState text={t("no_attendance")} icon={FileText} />
-        ) : (
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {recent.map((r, i) => (
-              <div key={i} className="shrink-0 w-16 rounded-2xl p-2 text-center" style={{ background: r.present ? "var(--soft-green-bg)" : r.excused ? "var(--soft-blue-bg)" : "var(--soft-orange-bg)" }}>
-                <div className="text-[10px] font-medium opacity-50 mono">{ruDate(r.date, locale)}</div>
-                <div className="text-[16px] my-1">{r.present ? <CheckCircle2 size={16} style={{ color: GREEN_D, display: "inline" }} /> : r.excused ? <Clock size={16} style={{ color: BLUE, display: "inline" }} /> : <XCircle size={16} style={{ color: BRICK, display: "inline" }} />}</div>
-                {r.grade ? (
-                  <div className="text-[11px] font-bold text-white rounded-full px-1.5 py-0.5 inline-block" style={{ background: gradeColors[r.grade] }}>{r.grade}</div>
-                ) : (
-                  <div className="text-[10px] opacity-30">—</div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* ДЗ / материалы */}
-      <Card className="p-4">
-        <h3 className="text-[14.5px] font-bold mb-3 flex items-center gap-1.5"><FileText size={16} />{t("homework")}</h3>
-        {materials.length === 0 ? (
-          <EmptyState text={t("no_homework")} icon={FileText} />
-        ) : (
-          <div className="space-y-2">
-            {materials.map((m) => (
-              <div key={m.id} className="p-3 rounded-2xl" style={{ background: "var(--soft-yellow-bg-2)", border: "1px solid var(--soft-yellow-border)" }}>
-                <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#B45309" }}>{new Date(m.date).toLocaleDateString(locale, { day: "2-digit", month: "long" })}</div>
-                {m.text && <div className="text-[13px] mt-1 leading-snug">{m.text}</div>}
-                {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-medium flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} className="inline mr-1 -mt-0.5" />{t("open_material")}</a>}
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-/* ------------------------------- Рейтинг ------------------------------- */
-function RatingTab({ student, t }) {
-  const groupmates = student.groupmates || [];
-  if (!student.group) return <EmptyState text={t("rating_no_group")} icon={Trophy} />;
-  const podiumBg = ["linear-gradient(135deg,#FCD34D,#F59E0B)", "linear-gradient(135deg,#D1D5DB,#9CA3AF)", "linear-gradient(135deg,#FCA5A5,#EA580C)"];
-  return (
-    <div className="space-y-3">
-      <div className="rounded-3xl p-5 text-white text-center" style={{ background: `linear-gradient(135deg, ${GOLD}, #B45309)` }}>
-        <Trophy size={26} className="mx-auto" />
-        <h2 className="text-[16px] font-bold mt-1">{t("rating_title")}</h2>
-        <p className="text-[12px] opacity-85 mt-0.5">{t("rating_subtitle", { name: student.group.name })}</p>
-      </div>
-      {groupmates.length === 0 ? (
-        <EmptyState text={t("rating_empty")} icon={GraduationCap} />
-      ) : (
-        <Card className="p-2">
-          {groupmates.map((m, i) => {
-            const isMe = m.id === student.id;
-            return (
-              <div key={m.id} className="flex items-center gap-3 px-2.5 py-2.5 rounded-2xl" style={{ background: isMe ? RED_L : "transparent" }}>
-                <div className="w-7 text-center shrink-0">
-                  {i < 3 ? (
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-[13px] font-bold text-white mx-auto" style={{ background: podiumBg[i] }}>{i + 1}</div>
-                  ) : (
-                    <span className="text-[13px] font-semibold opacity-40">{i + 1}</span>
-                  )}
-                </div>
-                <Avatar name={m.name} size={36} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13.5px] font-semibold truncate" style={{ color: isMe ? RED_D : INK }}>{m.name}{isMe && t("you_suffix")}</div>
-                  {m.avgGrade !== null && m.avgGrade !== undefined && (
-                    <div className="text-[11px] opacity-50 mt-0.5">{t("avg_grade_line", { value: m.avgGrade })}</div>
-                  )}
-                </div>
-                <div className="text-[13.5px] font-bold px-2.5 py-1 rounded-full shrink-0 flex items-center gap-1" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}><CoinsIcon size={12} />{m.coins} GC</div>
-              </div>
-            );
-          })}
-        </Card>
-      )}
-    </div>
-  );
-}
-
-/* -------------------------------- Магазин -------------------------------- */
-function ShopTab({ student, shopItems, onRedeem, redeeming, t, lang }) {
-  const locale = LOCALE_OF[lang] || "ru-RU";
-  const [confirmId, setConfirmId] = useState(null);
-  const sorted = [...shopItems].sort((a, b) => (student.coins >= a.cost) === (student.coins >= b.cost) ? a.cost - b.cost : (student.coins >= a.cost ? -1 : 1));
-  const orders = [...(student.myOrders || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
-  return (
-    <div className="space-y-3">
-      <div className="rounded-3xl p-5 text-white flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
-        <div>
-          <p className="text-[11px] font-medium opacity-80 uppercase tracking-wide">{t("your_balance")}</p>
-          <h2 className="text-[26px] font-extrabold mt-0.5">{student.coins} <span className="text-[15px] font-semibold opacity-90">GC</span></h2>
-        </div>
-        <CoinsIcon size={30} className="opacity-90" />
-      </div>
-      {shopItems.length === 0 ? (
-        <EmptyState text={t("shop_empty")} icon={ShoppingBag} />
-      ) : (
-        <div className="grid grid-cols-2 gap-3">
-          {sorted.map((item, i) => {
-            const enough = student.coins >= item.cost;
-            const missing = item.cost - student.coins;
-            const colors = [["var(--soft-red-bg)", RED], ["var(--soft-blue-bg)", BLUE], ["var(--soft-yellow-bg)", "#B45309"], ["var(--soft-green-bg)", GREEN_D], ["var(--soft-purple-bg)", PURPLE]];
-            const [bg, fg] = colors[i % colors.length];
-            const confirming = confirmId === item.id;
-            return (
-              <div key={item.id} className="rounded-2xl overflow-hidden relative" style={{ background: "var(--surface)", boxShadow: "0 1px 3px rgba(26,26,23,0.07)" }}>
-                <div className="aspect-square flex items-center justify-center relative" style={{ background: bg, opacity: enough ? 1 : 0.6 }}>
-                  {item.image ? (
-                    <img src={item.image} alt="" className="w-full h-full object-cover" onError={(e) => { e.target.style.display = "none"; }} />
-                  ) : (
-                    <Gift size={32} style={{ opacity: 0.55 }} />
-                  )}
-                </div>
-                <div className="p-2.5">
-                  <div className="text-[12.5px] font-semibold leading-tight line-clamp-2" style={{ minHeight: 32 }}>{item.name}</div>
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-[13px] font-extrabold px-2 py-1 rounded-full" style={{ background: bg, color: fg }}>{item.cost} GC</span>
-                  </div>
-                  {!enough && <div className="text-[10px] font-medium mt-1.5" style={{ color: "#9C9A90" }}>{t("missing_gc", { sum: missing })}</div>}
-                  {enough && (
-                    confirming ? (
-                      <button
-                        onClick={() => { onRedeem(item.id); setConfirmId(null); }}
-                        disabled={redeeming}
-                        className="w-full mt-2.5 text-[12.5px] font-bold py-3 rounded-xl text-white active:scale-95 transition-transform"
-                        style={{ background: RED_D, opacity: redeeming ? 0.6 : 1 }}
-                      >
-                        {redeeming ? "…" : t("buy_confirm")}
-                      </button>
-                    ) : (
-                      <button onClick={() => setConfirmId(item.id)} className="w-full mt-2.5 text-[12.5px] font-bold py-3 rounded-xl text-white active:scale-95 transition-transform" style={{ background: RED }}>
-                        {t("buy")}
-                      </button>
-                    )
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <p className="text-[11px] opacity-40 text-center px-4">{t("shop_hint")}</p>
-
-      {orders.length > 0 && (
-        <Card className="p-4">
-          <h3 className="text-[14px] font-bold mb-2.5 flex items-center gap-1.5"><ShoppingBag size={16} />{t("my_orders")}</h3>
-          <div className="space-y-1.5">
-            {orders.map((o) => (
-              <div key={o.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl" style={{ background: PAPER }}>
-                <div className="min-w-0">
-                  <div className="text-[12.5px] font-medium truncate">{o.itemName}</div>
-                  <div className="text-[10.5px] opacity-45 mt-0.5">{ruDate(o.date, locale)} · {o.cost} GC</div>
-                </div>
-                {o.status === "fulfilled" ? (
-                  <span className="shrink-0 text-[10.5px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ background: "var(--soft-green-bg)", color: GREEN_D }}><CheckCircle2 size={11} />{t("order_done")}</span>
-                ) : (
-                  <span className="shrink-0 text-[10.5px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}><Clock size={11} />{t("order_pending")}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-    </div>
-  );
-}
-
-/* -------------------------------- Профиль -------------------------------- */
-function FaqSection({ t }) {
-  const [openId, setOpenId] = useState(null);
-  const items = [1, 2, 3, 4, 5, 6].map((n) => ({ id: n, q: t(`faq_q${n}`), a: t(`faq_a${n}`) }));
-  return (
-    <Card className="p-4">
-      <h3 className="text-[13.5px] font-bold mb-2.5">{t("faq_title")}</h3>
-      <div className="space-y-1.5">
-        {items.map((item) => {
-          const open = openId === item.id;
-          return (
-            <div key={item.id} className="rounded-2xl overflow-hidden" style={{ background: "var(--surface-soft)" }}>
-              <button onClick={() => setOpenId(open ? null : item.id)} className="w-full flex items-center justify-between gap-2 px-3.5 py-3 text-left">
-                <span className="text-[12.5px] font-semibold leading-snug">{item.q}</span>
-                <span className="text-[13px] opacity-40 shrink-0 transition-transform duration-150" style={{ transform: open ? "rotate(180deg)" : "none" }}>▾</span>
-              </button>
-              {open && <div className="px-3.5 pb-3 text-[12.5px] leading-relaxed opacity-70">{item.a}</div>}
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
-
-function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme }) {
-  const locale = LOCALE_OF[lang] || "ru-RU";
-  return (
-    <div className="space-y-3">
-      <Card className="p-6 text-center">
-        <Avatar name={student.name} size={72} />
-        <h2 className="text-[17px] font-bold mt-3">{student.name}</h2>
-        {student.phone && <p className="text-[13px] opacity-50 mt-0.5">{student.phone}</p>}
-        <div className="flex items-center justify-center gap-2 mt-3">
-          <span className="text-[13px] font-bold px-3 py-1.5 rounded-full" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}><CoinsIcon size={13} className="inline mr-1 -mt-0.5" />{student.coins} GC</span>
-          {student.discount > 0 && <span className="text-[13px] font-bold px-3 py-1.5 rounded-full" style={{ background: "var(--soft-green-bg)", color: GREEN_D }}>−{student.discount}%</span>}
-        </div>
-      </Card>
-      <Card className="p-4">
-        <h3 className="text-[13.5px] font-bold mb-2.5">{t("info_title")}</h3>
-        <div className="space-y-2 text-[13px]">
-          <div className="flex items-center justify-between py-1.5" style={{ borderBottom: `1px solid ${LINE}` }}><span className="opacity-50">{t("group_label")}</span><span className="font-medium">{student.group?.name || "—"}</span></div>
-          <div className="flex items-center justify-between py-1.5" style={{ borderBottom: `1px solid ${LINE}` }}><span className="opacity-50">{t("course_label")}</span><span className="font-medium">{student.group?.course || "—"}</span></div>
-          <div className="flex items-center justify-between py-1.5" style={{ borderBottom: `1px solid ${LINE}` }}><span className="opacity-50">{t("teacher_label")}</span><span className="font-medium">{student.teacherName || "—"}</span></div>
-          <div className="flex items-center justify-between py-1.5"><span className="opacity-50">{t("debt")}</span><span className="font-semibold" style={{ color: student.debt > 0 ? RED_D : GREEN_D }}>{fmt(student.debt)} {lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}</span></div>
-        </div>
-      </Card>
-
-      {(student.adminTelegram || student.teacherTelegram) && (
-        <Card className="p-4">
-          <h3 className="text-[13.5px] font-bold mb-2.5">{t("contact")}</h3>
-          <div className="space-y-2">
-            {student.adminTelegram && (
-              <a href={`https://t.me/${student.adminTelegram}`} target="_blank" rel="noreferrer" className="w-full flex items-center justify-between px-4 py-3 rounded-2xl" style={{ background: "var(--soft-purple-bg-2)" }}>
-                <span className="text-[13px] font-semibold" style={{ color: "var(--soft-purple-fg)" }}>{t("contact_admin")}</span>
-                <Megaphone size={16} style={{ color: "var(--soft-purple-fg)" }} />
-              </a>
-            )}
-            {student.teacherTelegram && (
-              <a href={`https://t.me/${student.teacherTelegram}`} target="_blank" rel="noreferrer" className="w-full flex items-center justify-between px-4 py-3 rounded-2xl" style={{ background: RED_L }}>
-                <span className="text-[13px] font-semibold" style={{ color: RED_D }}>{t("contact_teacher", { name: student.teacherName || t("teacher_fallback") })}</span>
-                <GraduationCap size={16} style={{ color: RED_D }} />
-              </a>
-            )}
-          </div>
-        </Card>
-      )}
-      {(student.payments || []).length > 0 && (
-        <Card className="p-4">
-          <h3 className="text-[13.5px] font-bold mb-2.5">{t("recent_payments")}</h3>
-          <div className="space-y-1.5">
-            {[...student.payments].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 6).map((p, i) => (
-              <div key={i} className="flex items-center justify-between text-[12.5px]">
-                <span className="opacity-55 mono">{ruDate(p.date, locale)}</span>
-                <span className="font-semibold" style={{ color: GREEN_D }}>+{fmt(p.amount)} {lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      <FaqSection t={t} />
-
-      <Card className="p-4">
-        <h3 className="text-[13.5px] font-bold mb-3">{t("settings")}</h3>
-        <div className="flex items-center justify-between py-2">
-          <span className="text-[13px] opacity-60">{t("language")}</span>
-          <div className="flex items-center gap-0.5 p-1 rounded-full" style={{ background: "var(--surface-alt)" }}>
-            {["ru", "en", "uz"].map((l) => (
-              <button
-                key={l}
-                onClick={() => changeLang(l)}
-                className="w-9 h-9 rounded-full flex items-center justify-center text-[16px] transition-all duration-150"
-                style={{ background: lang === l ? "var(--surface)" : "transparent", boxShadow: lang === l ? "0 2px 6px rgba(0,0,0,0.14)" : "none", transform: lang === l ? "scale(1.08)" : "scale(1)" }}
-              >
-                {LANG_FLAGS[l]}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center justify-between py-2 mt-1">
-          <span className="text-[13px] opacity-60">{t("theme")}</span>
-          <div className="flex items-center gap-0.5 p-1 rounded-full" style={{ background: "var(--surface-alt)" }}>
-            <button onClick={() => changeTheme("light")} className="px-3.5 py-1.5 rounded-full text-[12px] font-medium flex items-center gap-1 transition-all duration-150" style={{ background: theme === "light" ? "var(--surface)" : "transparent", boxShadow: theme === "light" ? "0 2px 6px rgba(0,0,0,0.14)" : "none", color: "var(--ink)" }}>☀️ {t("theme_light")}</button>
-            <button onClick={() => changeTheme("dark")} className="px-3.5 py-1.5 rounded-full text-[12px] font-medium flex items-center gap-1 transition-all duration-150" style={{ background: theme === "dark" ? "var(--surface)" : "transparent", boxShadow: theme === "dark" ? "0 2px 6px rgba(0,0,0,0.14)" : "none", color: "var(--ink)" }}>🌙 {t("theme_dark")}</button>
-          </div>
-        </div>
-      </Card>
-
-      <button onClick={onLogout} className="w-full text-[13px] font-medium py-3 rounded-2xl flex items-center justify-center gap-1.5" style={{ background: "var(--surface-alt)", color: "var(--ink)", opacity: 0.75 }}><LogOut size={14} />{t("logout")}</button>
-    </div>
-  );
-}
-
-/* -------------------------------- Экран входа -------------------------------- */
-function LoginScreen({ phone, setPhone, password, setPassword, loginError, loginLoading, onLogin, lang, changeLang, theme, changeTheme, t }) {
-  return (
-    <div className={`theme-${theme} min-h-screen flex items-center justify-center p-4`} style={{ background: PAPER }}>
-      <style>{FONT_IMPORT}</style>
-      <style>{THEME_VARS}</style>
-      <div className="w-full max-w-sm">
-        <div className="flex items-center justify-center gap-2.5 mb-5">
-          <div className="flex items-center gap-0.5 p-1 rounded-full" style={{ background: "var(--surface-alt)" }}>
-            {["ru", "en", "uz"].map((l) => (
-              <button
-                key={l}
-                onClick={() => changeLang(l)}
-                className="w-9 h-9 rounded-full flex items-center justify-center text-[16px] transition-all duration-150"
-                style={{ background: lang === l ? "var(--surface)" : "transparent", boxShadow: lang === l ? "0 2px 6px rgba(0,0,0,0.14)" : "none", transform: lang === l ? "scale(1.08)" : "scale(1)" }}
-              >
-                {LANG_FLAGS[l]}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => changeTheme(theme === "light" ? "dark" : "light")}
-            className="w-9 h-9 rounded-full flex items-center justify-center text-[15px]"
-            style={{ background: "var(--surface-alt)" }}
-          >
-            {theme === "light" ? "🌙" : "☀️"}
-          </button>
-        </div>
-        <div className="text-center mb-6">
-          <div className="w-16 h-16 rounded-3xl mx-auto flex items-center justify-center text-white text-[24px] font-extrabold" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>GU</div>
-          <h1 className="text-[19px] font-extrabold mt-3">Global Up</h1>
-          <p className="text-[13px] opacity-50 mt-0.5">{t("login_title")}</p>
-        </div>
-        <Card className="p-6">
-          <div className="space-y-3">
-            <div>
-              <label className="text-[12px] font-medium opacity-50 block mb-1.5">{t("login_phone")}</label>
-              <div className="flex items-center gap-1.5">
-                <span className="shrink-0 px-3.5 py-3 rounded-2xl text-[14px] font-semibold" style={{ background: "var(--surface-alt)" }}>+998</span>
-                <input
-                  inputMode="numeric"
-                  value={formatUzPhone((phone || "").replace(/[^0-9]/g, "").replace(/^998/, "").slice(0, 9))}
-                  onChange={(e) => setPhone("+998 " + formatUzPhone(e.target.value.replace(/[^0-9]/g, "").slice(0, 9)))}
-                  placeholder="90 123 45 67"
-                  className="w-full text-[15px] px-4 py-3 rounded-2xl outline-none"
-                  style={{ border: `1.5px solid ${LINE}`, background: PAPER, color: INK }}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-[12px] font-medium opacity-50 block mb-1.5">{t("login_password")}</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full text-[15px] px-4 py-3 rounded-2xl outline-none" style={{ border: `1.5px solid ${LINE}`, background: PAPER, color: INK }} />
-            </div>
-            {loginError && <p className="text-[12px] break-words font-medium" style={{ color: RED_D }}>{loginError}</p>}
-            <button onClick={onLogin} disabled={loginLoading} className="w-full text-[15px] font-bold py-3.5 rounded-2xl text-white" style={{ background: RED, opacity: loginLoading ? 0.6 : 1 }}>
-              {loginLoading ? "…" : t("login_button")}
-            </button>
-          </div>
-        </Card>
-        <p className="text-[11px] opacity-40 mt-4 text-center px-4">{t("login_remember")}</p>
-      </div>
-    </div>
-  );
-}
-
-/* ----------------------------------- Переводы ----------------------------------- */
-const TRANSLATIONS = {
-  ru: {
-    tab_home: "Главная", tab_rating: "Рейтинг", tab_shop: "Магазин", tab_profile: "Профиль",
-    balance: "Баланс", debt: "Долг", debt_none: "Долгов нет", debt_credit_note: "В счёт след. месяца",
-    coins: "GlobalCoins", credit_note: "На балансе {sum} сум — уменьшит следующее начисление",
-    progress_title: "Мой прогресс", progress_none: "Пока нет данных",
-    progress_great: "Отлично! Продолжай в том же духе", progress_ok: "Неплохо, но можно лучше",
-    progress_bad: "Много пропусков — постарайся не пропускать",
-    trend_up: "Растёт", trend_down: "Снижается", trend_same: "Стабильно",
-    lessons_attended: "занятий посещено", streak_days: "подряд без пропусков", avg_grade: "средний балл",
-    no_group: "Пока не закреплена группа", teacher_label: "Преподаватель",
-    attendance_grades: "Посещаемость и оценки", no_attendance: "Пока нет отметок посещаемости",
-    homework: "Домашнее задание", no_homework: "Пока нет домашних заданий", open_material: "Открыть материал",
-    important_notice: "Важное уведомление",
-    your_balance: "Ваш баланс", shop_empty: "Магазин пока пуст", buy: "Купить", buy_confirm: "Точно купить?",
-    missing_gc: "Ещё {sum} GC", shop_hint: "После покупки заявка сразу видна администратору и директору — просто дождитесь, когда вам выдадут награду.",
-    my_orders: "Мои заказы", order_done: "Выдано", order_pending: "В очереди",
-    rank_you: "вы", place_label: "Ваше место", of_label: "из",
-    contact: "Связаться", contact_admin: "Написать администрации", contact_teacher: "Написать {name}",
-    logout: "Выйти из аккаунта", payment_history: "История оплат",
-    login_title: "Вход в систему", login_phone: "Номер телефона", login_password: "Пароль",
-    login_button: "Войти", login_error_generic: "Не удалось войти", login_remember: "После первого входа вход запомнится на этом устройстве.",
-    loading: "Загрузка…", settings: "Настройки", language: "Язык", theme: "Тема",
-    theme_light: "Светлая", theme_dark: "Тёмная",
-    month_breakdown: "Разбивка по месяцам", discount_label: "Скидка −{pct}%",
-    empty_student: "Ученик не найден", refresh: "Обновить",
-    rating_title: "Рейтинг группы", rating_subtitle: "{name} · по GlobalCoins",
-    rating_no_group: "Рейтинг появится, когда закрепят группу", rating_empty: "В группе пока никого нет",
-    avg_grade_line: "Средний балл: {value}", you_suffix: " (вы)",
-    info_title: "Информация", group_label: "Группа", course_label: "Курс",
-    recent_payments: "Последние оплаты", teacher_fallback: "преподавателю",
-    identity_error: "Не удалось подтвердить личность — откройте приложение заново и попробуйте снова.",
-    order_sent: "Заявка отправлена! Дождитесь выдачи у администратора.",
-    coins_awarded: "Начислены GlobalCoins!", no_schedule: "не задано",
-    server_timeout: "Сервер не ответил вовремя — проверьте интернет-соединение и попробуйте ещё раз.",
-    server_unreachable: "Нет связи с сервером: {msg}",
-    faq_title: "Вопросы и ответы",
-    faq_q1: "Как начисляются GlobalCoins?",
-    faq_a1: "Учитель начисляет монеты за оценки и активность на занятии, за хорошую посещаемость без пропусков, а также за успехи и конкретные достижения — например, победы на олимпиадах или высокие баллы на тестах.",
-    faq_q2: "Что будет, если пропустить занятие без уважительной причины?",
-    faq_a2: "Это отмечается в журнале посещаемости, но урок всё равно нужно оплатить — как за проведённый. Освобождает от оплаты только пропуск по уважительной причине, отмеченный учителем.",
-    faq_q3: "Что делать, если заранее знаю, что пропущу занятие по болезни или другой уважительной причине?",
-    faq_a3: "Нужно предупредить учителя или администрацию центра заранее — лично или в Telegram.",
-    faq_q4: "Как изменить или узнать пароль входа?",
-    faq_a4: "Логин и пароль выдаёт администрация центра — при необходимости обратитесь к ним лично или в Telegram, чтобы узнать текущий пароль или получить новый.",
-    faq_q5: "Как оплатить за обучение?",
-    faq_a5: "Оплата принимается администрацией центра — наличными, картой или переводом. После оплаты сумма сразу отражается в этом приложении.",
-    faq_q6: "Что такое баланс и переплата?",
-    faq_a6: "Если оплатили больше, чем был долг, разница сохраняется как баланс и автоматически уменьшает следующее начисление за обучение — деньги никогда не пропадают.",
-  },
-  en: {
-    tab_home: "Home", tab_rating: "Rating", tab_shop: "Shop", tab_profile: "Profile",
-    balance: "Balance", debt: "Debt", debt_none: "No debt", debt_credit_note: "Credit for next month",
-    coins: "GlobalCoins", credit_note: "Balance: {sum} — will reduce your next charge",
-    progress_title: "My progress", progress_none: "No data yet",
-    progress_great: "Great! Keep it up", progress_ok: "Not bad, but could be better",
-    progress_bad: "Too many absences — try not to miss classes",
-    trend_up: "Improving", trend_down: "Declining", trend_same: "Stable",
-    lessons_attended: "lessons attended", streak_days: "in a row, no misses", avg_grade: "average grade",
-    no_group: "No group assigned yet", teacher_label: "Teacher",
-    attendance_grades: "Attendance & grades", no_attendance: "No attendance records yet",
-    homework: "Homework", no_homework: "No homework yet", open_material: "Open material",
-    important_notice: "Important notice",
-    your_balance: "Your balance", shop_empty: "Shop is empty for now", buy: "Buy", buy_confirm: "Confirm purchase?",
-    missing_gc: "{sum} GC more needed", shop_hint: "After purchase, the admin and director see your request right away — just wait for them to hand over the reward.",
-    my_orders: "My orders", order_done: "Delivered", order_pending: "Pending",
-    rank_you: "you", place_label: "Your place", of_label: "of",
-    contact: "Contact", contact_admin: "Message admin", contact_teacher: "Message {name}",
-    logout: "Log out", payment_history: "Payment history",
-    login_title: "Sign in", login_phone: "Phone number", login_password: "Password",
-    login_button: "Sign in", login_error_generic: "Sign-in failed", login_remember: "After your first sign-in this device will remember you.",
-    loading: "Loading…", settings: "Settings", language: "Language", theme: "Theme",
-    theme_light: "Light", theme_dark: "Dark",
-    month_breakdown: "Breakdown by month", discount_label: "Discount −{pct}%",
-    empty_student: "Student not found", refresh: "Refresh",
-    rating_title: "Group rating", rating_subtitle: "{name} · by GlobalCoins",
-    rating_no_group: "Rating will appear once a group is assigned", rating_empty: "No one in the group yet",
-    avg_grade_line: "Average grade: {value}", you_suffix: " (you)",
-    info_title: "Information", group_label: "Group", course_label: "Course",
-    recent_payments: "Recent payments", teacher_fallback: "the teacher",
-    identity_error: "Could not verify your identity — please reopen the app and try again.",
-    order_sent: "Request sent! Wait for the admin to hand over the reward.",
-    coins_awarded: "GlobalCoins awarded!", no_schedule: "not set",
-    server_timeout: "The server did not respond in time — check your connection and try again.",
-    server_unreachable: "No connection to server: {msg}",
-    faq_title: "Questions & answers",
-    faq_q1: "How are GlobalCoins awarded?",
-    faq_a1: "The teacher awards coins for grades and activity in class, for good attendance without misses, and for achievements — such as winning olympiads or high test scores.",
-    faq_q2: "What happens if I miss a class without an excused reason?",
-    faq_a2: "It is marked in the attendance log, but the lesson still has to be paid for, as if you attended. Only an excused absence, marked by the teacher, is free of charge.",
-    faq_q3: "What should I do if I know in advance I will miss a class due to illness or another valid reason?",
-    faq_a3: "Let the teacher or the center administration know in advance, in person or via Telegram.",
-    faq_q4: "How do I change or find out my login password?",
-    faq_a4: "The login and password are issued by the center administration. Contact them in person or via Telegram to find out your current password or get a new one.",
-    faq_q5: "How do I pay for my classes?",
-    faq_a5: "Payments are accepted by the center administration, in cash, by card, or by transfer. The amount is reflected in this app right after payment.",
-    faq_q6: "What is the balance / overpayment?",
-    faq_a6: "If you paid more than you owed, the difference is kept as a balance and automatically reduces your next charge. The money is never lost.",
-  },
-  uz: {
-    tab_home: "Asosiy", tab_rating: "Reyting", tab_shop: "Do'kon", tab_profile: "Profil",
-    balance: "Balans", debt: "Qarz", debt_none: "Qarz yo'q", debt_credit_note: "Keyingi oyga hisobga olinadi",
-    coins: "GlobalCoins", credit_note: "Balansda {sum} so'm — keyingi to'lovni kamaytiradi",
-    progress_title: "Mening natijam", progress_none: "Hozircha ma'lumot yo'q",
-    progress_great: "Ajoyib! Shu tarzda davom eting", progress_ok: "Yomon emas, lekin yaxshiroq bo'lishi mumkin",
-    progress_bad: "Ko'p qoldirilgan darslar — darslarni qoldirmaslikka harakat qiling",
-    trend_up: "O'smoqda", trend_down: "Pasaymoqda", trend_same: "Barqaror",
-    lessons_attended: "dars qatnashildi", streak_days: "ketma-ket, qoldirmasdan", avg_grade: "o'rtacha baho",
-    no_group: "Hali guruh biriktirilmagan", teacher_label: "O'qituvchi",
-    attendance_grades: "Davomat va baholar", no_attendance: "Hozircha davomat belgilari yo'q",
-    homework: "Uyga vazifa", no_homework: "Hozircha uyga vazifa yo'q", open_material: "Materialni ochish",
-    important_notice: "Muhim xabar",
-    your_balance: "Balansingiz", shop_empty: "Do'kon hozircha bo'sh", buy: "Sotib olish", buy_confirm: "Rostdan sotib olasizmi?",
-    missing_gc: "Yana {sum} GC kerak", shop_hint: "Xarid qilingandan so'ng ariza darhol administrator va direktorga ko'rinadi — sovg'a topshirilishini kuting.",
-    my_orders: "Mening buyurtmalarim", order_done: "Topshirildi", order_pending: "Navbatda",
-    rank_you: "siz", place_label: "Sizning o'rningiz", of_label: "dan",
-    contact: "Bog'lanish", contact_admin: "Administratsiyaga yozish", contact_teacher: "{name}ga yozish",
-    logout: "Chiqish", payment_history: "To'lovlar tarixi",
-    login_title: "Tizimga kirish", login_phone: "Telefon raqami", login_password: "Parol",
-    login_button: "Kirish", login_error_generic: "Kirib bo'lmadi", login_remember: "Birinchi marta kirgandan so'ng bu qurilma sizni eslab qoladi.",
-    loading: "Yuklanmoqda…", settings: "Sozlamalar", language: "Til", theme: "Mavzu",
-    theme_light: "Yorug'", theme_dark: "Tungi",
-    month_breakdown: "Oylar bo'yicha taqsimot", discount_label: "Chegirma −{pct}%",
-    empty_student: "O'quvchi topilmadi", refresh: "Yangilash",
-    rating_title: "Guruh reytingi", rating_subtitle: "{name} · GlobalCoins bo'yicha",
-    rating_no_group: "Guruh biriktirilgach reyting paydo bo'ladi", rating_empty: "Guruhda hali hech kim yo'q",
-    avg_grade_line: "O'rtacha baho: {value}", you_suffix: " (siz)",
-    info_title: "Ma'lumot", group_label: "Guruh", course_label: "Kurs",
-    recent_payments: "So'nggi to'lovlar", teacher_fallback: "o'qituvchiga",
-    identity_error: "Shaxsni tasdiqlab bo'lmadi — ilovani qayta oching va yana urinib ko'ring.",
-    order_sent: "Ariza yuborildi! Administrator sovg'ani topshirishini kuting.",
-    coins_awarded: "GlobalCoins berildi!", no_schedule: "belgilanmagan",
-    server_timeout: "Server javob bermadi — internetni tekshirib, qayta urinib ko'ring.",
-    server_unreachable: "Server bilan aloqa yo'q: {msg}",
-    faq_title: "Savol-javoblar",
-    faq_q1: "GlobalCoins qanday beriladi?",
-    faq_a1: "O'qituvchi darsdagi baho va faollik uchun, qoldirilmagan davomat uchun, shuningdek yutuqlar uchun (masalan, olimpiadalarda g'alaba yoki testlardan yuqori ball uchun) coin beradi.",
-    faq_q2: "Uzrli sababsiz darsni qoldirsam nima bo'ladi?",
-    faq_a2: "Bu davomat jurnaliga qayd etiladi, lekin dars baribir to'lanishi kerak, xuddi qatnashgandek. Faqat o'qituvchi tomonidan uzrli deb belgilangan sabab to'lovdan ozod qiladi.",
-    faq_q3: "Kasallik yoki boshqa uzrli sabab bilan darsni oldindan qoldirishimni bilsam, nima qilishim kerak?",
-    faq_a3: "O'qituvchi yoki markaz ma'muriyatini oldindan ogohlantiring, shaxsan yoki Telegram orqali.",
-    faq_q4: "Kirish parolimni qanday o'zgartirish yoki bilish mumkin?",
-    faq_a4: "Login va parolni markaz ma'muriyati beradi. Joriy parolni bilish yoki yangisini olish uchun ular bilan shaxsan yoki Telegram orqali bog'laning.",
-    faq_q5: "O'qish uchun qanday to'lov qilaman?",
-    faq_a5: "To'lovlar markaz ma'muriyati tomonidan qabul qilinadi: naqd pul, karta yoki o'tkazma orqali. To'lovdan so'ng summa darhol shu ilovada ko'rinadi.",
-    faq_q6: "Balans va ortiqcha to'lov nima?",
-    faq_a6: "Agar qarzdan ko'proq to'lasangiz, farq balans sifatida saqlanadi va keyingi to'lovni avtomatik kamaytiradi. Pul hech qachon yo'qolmaydi.",
-  },
-};
-function translate(lang, key, vars) {
-  let str = (TRANSLATIONS[lang] && TRANSLATIONS[lang][key]) || TRANSLATIONS.ru[key] || key;
-  if (vars) Object.keys(vars).forEach((k) => { str = str.replace(`{${k}}`, vars[k]); });
-  return str;
-}
-const LOCALE_OF = { ru: "ru-RU", en: "en-US", uz: "uz-Latn" };
-
-/* ----------------------------------- App ----------------------------------- */
-function tabsFor(t) {
-  return [
-    { key: "home", label: t("tab_home"), icon: Home },
-    { key: "rating", label: t("tab_rating"), icon: Trophy },
-    { key: "shop", label: t("tab_shop"), icon: ShoppingBag },
-    { key: "profile", label: t("tab_profile"), icon: User },
-  ];
-}
-
-export default function ParentApp() {
-  const [phase, setPhase] = useState("loading");
-  const [errorMsg, setErrorMsg] = useState("");
-  const [students, setStudents] = useState([]);
-  const [shopItems, setShopItems] = useState([]);
-  const [activeId, setActiveId] = useState(null);
-  const [initData, setInitData] = useState("");
+export default function TeacherApp() {
+  const [phase, setPhase] = useState("loading"); // loading | not_linked | ready | error
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
-  const [tab, setTab] = useState("home");
-  const [redeeming, setRedeeming] = useState(false);
-  const [toast, setToast] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [data, setData] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [langMenuOpen, setLangMenuOpen] = useState(false);
-  const [coinGain, setCoinGain] = useState(null); // { amount } — показывает конфетти, когда монеты выросли
-  const lastCoinsRef = useRef({}); // studentId -> последний известный баланс монет
-
-  // Язык и тема — выбор запоминается на этом устройстве
-  const [lang, setLang] = useState(() => { try { return localStorage.getItem("gu_lang") || "ru"; } catch { return "ru"; } });
-  const [theme, setTheme] = useState(() => { try { return localStorage.getItem("gu_theme") || "light"; } catch { return "light"; } });
-  const t = (key, vars) => translate(lang, key, vars);
-  const changeLang = (l) => { setLang(l); try { localStorage.setItem("gu_lang", l); } catch {} };
-  const changeTheme = (th) => { setTheme(th); try { localStorage.setItem("gu_theme", th); } catch {} };
-
-  // Оборачивает setStudents: сравнивает баланс монет каждого ученика с прошлым разом
-  // и, если он вырос (учитель/админ начислил), показывает конфетти с количеством монет.
-  const applyStudents = (nextStudents) => {
-    let gained = 0;
-    (nextStudents || []).forEach((s) => {
-      const prev = lastCoinsRef.current[s.id];
-      if (prev !== undefined && s.coins > prev) gained += s.coins - prev;
-      lastCoinsRef.current[s.id] = s.coins;
-    });
-    if (gained > 0) setCoinGain({ amount: gained });
-    setStudents(nextStudents || []);
-  };
-
-  const loadWithCreds = async (data0, phoneVal, passwordVal) => {
-    try {
-      const data = phoneVal ? await fetchMyData(data0, phoneVal, passwordVal) : await fetchMyData(data0);
-      if (data.error) {
-        const full = data.debug ? `${data.error} — ${JSON.stringify(data.debug)}` : data.error;
-        if (phoneVal) { setLoginError(full); setPhase("not_linked"); return; }
-        setErrorMsg(full); setPhase("error"); return;
-      }
-      if (!data.linked) {
-        if (phoneVal) setLoginError(data.loginError || `Диагностика: ${JSON.stringify(data)}`);
-        setPhase("not_linked");
-        return;
-      }
-      applyStudents(data.students);
-      setShopItems(data.shopItems || []);
-      setActiveId(data.students[0]?.id || null);
-      setPhase("ready");
-      if (phoneVal && passwordVal) {
-        try { localStorage.setItem("gu_phone", phoneVal); localStorage.setItem("gu_password", passwordVal); } catch {}
-      }
-    } catch (e) {
-      setErrorMsg(String(e?.message || e));
-      setPhase("error");
-    }
-  };
-
   const [refreshing, setRefreshing] = useState(false);
-  const silentRefresh = async () => {
-    if (phase !== "ready") return;
-    setRefreshing(true);
-    try {
-      const data = await fetchMyData(initData, phone.trim() || null, password.trim() || null);
-      if (!data.error && data.linked) {
-        applyStudents(data.students);
-        setShopItems(data.shopItems || []);
-      }
-    } finally {
-      setRefreshing(false);
-    }
-  };
 
+  const [lang, setLang] = useState(() => { try { return localStorage.getItem("gu_teacher_lang") || "ru"; } catch { return "ru"; } });
+  const [theme, setTheme] = useState(() => { try { return localStorage.getItem("gu_teacher_theme") || "light"; } catch { return "light"; } });
+  const changeLang = (l) => { setLang(l); try { localStorage.setItem("gu_teacher_lang", l); } catch {} };
+  const changeTheme = (th) => { setTheme(th); try { localStorage.setItem("gu_teacher_theme", th); } catch {} };
+  const t = useCallback((key, vars) => translate(lang, key, vars), [lang]);
+
+  const notify = useCallback((text, tone = "teal") => setToast({ text, tone, key: uid() }), []);
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 3200); return () => clearTimeout(t); }, [toast]);
+
+  // Первая загрузка — пробуем сохранённые на этом устройстве телефон/пароль
   useEffect(() => {
-    const tg = window.Telegram?.WebApp;
-    if (tg) {
-      tg.ready();
-      tg.expand();
-      if (tg.setHeaderColor) try { tg.setHeaderColor("#F7F5F0"); } catch {}
-      if (tg.setBackgroundColor) try { tg.setBackgroundColor("#F7F5F0"); } catch {}
-    }
-    const data0 = tg?.initData || "";
-    setInitData(data0);
     (async () => {
-      // Сначала пробуем без пароля (сработает, если Telegram уже привязан).
-      const first = await fetchMyData(data0);
-      if (first.linked) {
-        applyStudents(first.students);
-        setShopItems(first.shopItems || []);
-        setActiveId(first.students[0]?.id || null);
-        setPhase("ready");
-        return;
-      }
-      // Не привязан — пробуем логин/пароль, сохранённые с прошлого раза на этом устройстве.
       let savedPhone = "", savedPassword = "";
-      try { savedPhone = localStorage.getItem("gu_phone") || ""; savedPassword = localStorage.getItem("gu_password") || ""; } catch {}
+      try { savedPhone = localStorage.getItem("gu_teacher_phone") || ""; savedPassword = localStorage.getItem("gu_teacher_password") || ""; } catch {}
       if (savedPhone && savedPassword) {
-        setPhone(savedPhone); setPassword(savedPassword);
-        await loadWithCreds(data0, savedPhone, savedPassword);
-        return;
+        const res = await callTeacherPortal(savedPhone, savedPassword);
+        if (res.error) { setErrorMsg(res.error); setPhase("error"); return; }
+        if (res.linked) { setPhone(savedPhone); setPassword(savedPassword); setData(res); setPhase("ready"); return; }
       }
       setPhase("not_linked");
     })();
   }, []);
 
-  // Обновляем данные сами: когда приложение снова становится видимым и каждые 25 секунд, пока открыто.
+  const handleLogin = async () => {
+    if (!phone.trim() || !password.trim()) return;
+    setLoginError(""); setLoginLoading(true);
+    const res = await callTeacherPortal(phone.trim(), password.trim());
+    setLoginLoading(false);
+    if (res.error) { setLoginError(res.error); return; }
+    if (!res.linked) { setLoginError(res.loginError || t("login_failed_generic")); return; }
+    setPhone(phone.trim()); setPassword(password.trim());
+    try { localStorage.setItem("gu_teacher_phone", phone.trim()); localStorage.setItem("gu_teacher_password", password.trim()); } catch {}
+    setData(res);
+    setPhase("ready");
+  };
+
+  const handleLogout = () => {
+    try { localStorage.removeItem("gu_teacher_phone"); localStorage.removeItem("gu_teacher_password"); } catch {}
+    setPhone(""); setPassword(""); setData(null); setLoginError("");
+    setPhase("not_linked");
+  };
+
+  // Любое действие (отметить посещение, поставить оценку и т.д.) идёт сюда — сервер сам проверяет
+  // телефон+пароль заново и возвращает обновлённые данные.
+  const doAction = async (action, payload) => {
+    const res = await callTeacherPortal(phone, password, action, payload);
+    if (res.error) { notify(res.error, "brick"); return; }
+    if (!res.linked) { notify(res.loginError || t("session_error"), "brick"); return; }
+    setData(res);
+  };
+
+  const silentRefresh = async () => {
+    if (phase !== "ready") return;
+    setRefreshing(true);
+    try {
+      const res = await callTeacherPortal(phone, password);
+      if (res.linked) setData(res);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Автообновление — раз в 25 секунд и при возврате в приложение
   useEffect(() => {
     const onVisible = () => { if (document.visibilityState === "visible") silentRefresh(); };
     document.addEventListener("visibilitychange", onVisible);
     const interval = setInterval(() => silentRefresh(), 25000);
     return () => { document.removeEventListener("visibilitychange", onVisible); clearInterval(interval); };
-  }, [phase, initData, phone, password]);
-
-  const handleLogin = async () => {
-    if (!phone.trim() || !password.trim()) return;
-    setLoginError("");
-    setLoginLoading(true);
-    try {
-      await loadWithCreds(initData, phone.trim(), password.trim());
-    } finally {
-      setLoginLoading(false);
-    }
-  };
-
-  const handleLogout = () => {
-    setStudents([]);
-    lastCoinsRef.current = {};
-    setPhone(""); setPassword(""); setLoginError("");
-    try { localStorage.removeItem("gu_phone"); localStorage.removeItem("gu_password"); } catch {}
-    setPhase("not_linked");
-  };
-
-  const student = students.find((s) => s.id === activeId);
-
-  const handleRedeem = async (itemId) => {
-    if (!student) return;
-    setRedeeming(true);
-    try {
-      const data = await fetchMyData(initData, phone.trim() || null, password.trim() || null, itemId, student.id);
-      if (data.error) { setToast(data.error); setTimeout(() => setToast(""), 3000); return; }
-      if (!data.linked) { setToast(t("identity_error")); setTimeout(() => setToast(""), 4000); return; }
-      if (data.redeemed) {
-        applyStudents(data.students);
-        setToast(t("order_sent"));
-        setTimeout(() => setToast(""), 3500);
-      }
-    } finally {
-      setRedeeming(false);
-    }
-  };
+  }, [phase, phone, password]);
 
   if (phase === "loading") {
     return (
-      <div className={`theme-${theme} min-h-screen flex items-center justify-center`} style={{ background: PAPER }}>
+      <div className={`theme-${theme} min-h-screen flex items-center justify-center`} style={{ background: PAPER, fontFamily: "'Inter', sans-serif" }}>
         <style>{FONT_IMPORT}</style>
         <style>{THEME_VARS}</style>
-        <div className="text-center">
-          <div className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-white text-[16px] font-extrabold" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})`, animation: "pulseLogo 1.1s ease-in-out infinite" }}>GU</div>
-          <p className="text-[12.5px] opacity-45 mt-3" style={{ color: INK }}>{t("loading")}</p>
-          <style>{`@keyframes pulseLogo { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.92); opacity: 0.75; } }`}</style>
-        </div>
+        <div className="flex items-center gap-2 text-[13px] opacity-60" style={{ color: INK }}><Loader2 size={16} className="animate-spin" /> {t("loading")}</div>
       </div>
     );
   }
 
   if (phase === "error") {
     return (
-      <div className={`theme-${theme} min-h-screen flex items-center justify-center p-4`} style={{ background: PAPER, color: INK }}>
+      <div className={`theme-${theme} min-h-screen flex items-center justify-center p-4`} style={{ background: PAPER, fontFamily: "'Inter', sans-serif" }}>
         <style>{FONT_IMPORT}</style>
         <style>{THEME_VARS}</style>
-        <div className="max-w-sm text-center">
-          <XCircle size={30} className="mx-auto mb-2" style={{ color: BRICK }} />
-          <p className="text-[14px] font-bold mb-1.5">{t("login_error_generic")}</p>
-          <p className="text-[12.5px] opacity-55 break-words">{errorMsg}</p>
+        <div className="max-w-sm rounded-2xl p-6 text-center" style={{ border: `1px solid ${LINE}`, background: "var(--surface)", color: INK }}>
+          <AlertTriangle size={22} style={{ color: BRICK }} className="mx-auto mb-3" />
+          <p className="text-[14px] font-medium mb-1.5">{t("load_error_title")}</p>
+          <p className="text-[12.5px] opacity-60 mb-4 break-words">{errorMsg}</p>
+          <PrimaryBtn full onClick={() => window.location.reload()}>{t("reload_btn")}</PrimaryBtn>
         </div>
       </div>
     );
   }
 
-  if (phase === "not_linked") {
-    return <LoginScreen phone={phone} setPhone={setPhone} password={password} setPassword={setPassword} loginError={loginError} loginLoading={loginLoading} onLogin={handleLogin} lang={lang} changeLang={changeLang} theme={theme} changeTheme={changeTheme} t={t} />;
+  if (phase === "not_linked" || !data) {
+    return <LoginScreen phone={phone} setPhone={setPhone} password={password} setPassword={setPassword} onLogin={handleLogin} loading={loginLoading} error={loginError} t={t} lang={lang} changeLang={changeLang} theme={theme} changeTheme={changeTheme} />;
   }
 
+  const myTeacher = data.teacher;
+
   return (
-    <div className={`theme-${theme} min-h-screen anim-fade pb-24`} style={{ background: PAPER, color: INK }}>
+    <div className={`theme-${theme} app-bg min-h-screen w-full`} style={{ fontFamily: "'Inter', sans-serif", background: PAPER, color: INK }}>
       <style>{FONT_IMPORT}</style>
       <style>{THEME_VARS}</style>
-
-      {coinGain && <ConfettiOverlay amount={coinGain.amount} onDone={() => setCoinGain(null)} t={t} />}
-
-      {toast && (
-        <div className="fixed top-4 left-4 right-4 z-50 px-4 py-3 rounded-2xl text-[13px] font-medium text-white text-center" style={{ background: RED_D, boxShadow: "0 4px 16px rgba(0,0,0,0.2)" }}>
-          {toast}
-        </div>
-      )}
-
-      <div className="px-4 pt-5 pb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <Avatar name={student?.name || "?"} size={38} />
-          <div>
-            <div className="text-[15px] font-bold leading-none">{student?.name}</div>
-            <div className="text-[11.5px] opacity-45 mt-1">{student?.group?.name || "Global Up"}</div>
-          </div>
+      <header style={{ boxShadow: `0 1px 0 ${LINE}` }} className="flex items-center justify-between gap-3 px-4 py-4 md:px-8 backdrop-blur sticky top-0 z-20" >
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--soft-yellow-bg)" }}><span className="disp text-[12px] font-semibold" style={{ color: TEAL_D }}>GU</span></div>
+          <span className="disp text-[15px] font-semibold">Global Up · {t("login_subtitle")}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
-            <button onClick={() => setLangMenuOpen((v) => !v)} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-[16px] active:scale-90 transition-transform" style={{ background: "var(--surface)", border: `1px solid ${LINE}` }}>
+            <button onClick={() => setLangMenuOpen((v) => !v)} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-[15px]" style={{ background: "var(--surface)", border: `1px solid ${LINE}` }}>
               {LANG_FLAGS[lang]}
             </button>
             {langMenuOpen && (
@@ -1102,55 +1178,55 @@ export default function ParentApp() {
                 <div className="absolute right-0 mt-2 p-2 rounded-2xl z-40" style={{ background: "var(--surface)", boxShadow: "0 8px 24px rgba(0,0,0,0.18)", border: `1px solid ${LINE}` }}>
                   <div className="flex items-center gap-1 mb-1.5">
                     {["ru", "en", "uz"].map((l) => (
-                      <button key={l} onClick={() => { changeLang(l); }} className="w-9 h-9 rounded-full flex items-center justify-center text-[16px] transition-all duration-150" style={{ background: lang === l ? "var(--surface-alt)" : "transparent", transform: lang === l ? "scale(1.08)" : "scale(1)" }}>
+                      <button key={l} onClick={() => changeLang(l)} className="w-9 h-9 rounded-full flex items-center justify-center text-[15px] transition-all duration-150" style={{ background: lang === l ? "var(--surface-alt)" : "transparent", transform: lang === l ? "scale(1.08)" : "scale(1)" }}>
                         {LANG_FLAGS[l]}
                       </button>
                     ))}
                   </div>
                   <div className="flex items-center gap-1 pt-1.5" style={{ borderTop: `1px solid ${LINE}` }}>
-                    <button onClick={() => changeTheme("light")} className="flex-1 text-[11px] font-medium py-1.5 rounded-full flex items-center justify-center gap-1" style={{ background: theme === "light" ? "var(--surface-alt)" : "transparent" }}>☀️</button>
-                    <button onClick={() => changeTheme("dark")} className="flex-1 text-[11px] font-medium py-1.5 rounded-full flex items-center justify-center gap-1" style={{ background: theme === "dark" ? "var(--surface-alt)" : "transparent" }}>🌙</button>
+                    <button onClick={() => changeTheme("light")} className="flex-1 text-[11px] font-medium py-1.5 rounded-full" style={{ background: theme === "light" ? "var(--surface-alt)" : "transparent" }}>☀️</button>
+                    <button onClick={() => changeTheme("dark")} className="flex-1 text-[11px] font-medium py-1.5 rounded-full" style={{ background: theme === "dark" ? "var(--surface-alt)" : "transparent" }}>🌙</button>
                   </div>
                 </div>
               </>
             )}
           </div>
-          <button onClick={silentRefresh} disabled={refreshing} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={{ background: "var(--surface)", border: `1px solid ${LINE}` }} title={t("refresh")}>
+          <button onClick={silentRefresh} disabled={refreshing} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface)", border: `1px solid ${LINE}` }} title={t("refresh")}>
             <RefreshCw size={15} style={{ animation: refreshing ? "spin 0.7s linear infinite" : "none" }} />
           </button>
-          {students.length > 1 && (
-            <select value={activeId} onChange={(e) => setActiveId(e.target.value)} className="text-[12px] font-medium px-2.5 py-1.5 rounded-full outline-none" style={{ background: "var(--surface)", border: `1px solid ${LINE}`, color: "var(--ink)" }}>
-              {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          )}
+          <div className="relative">
+            <button onClick={() => setMenuOpen((o) => !o)} className="flex items-center gap-2 pl-3 pr-2.5 py-2 rounded-full text-[13px]" style={{ border: `1px solid ${LINE}`, background: "var(--surface)" }}>
+              <UserCircle2 size={16} style={{ color: TEAL }} /><span className="font-medium">{myTeacher?.name || t("settings")}</span><ChevronDown size={14} className="opacity-50" />
+            </button>
+            {menuOpen && (
+              <>
+                <button aria-label="close menu" className="fixed inset-0 z-10 cursor-default" onClick={() => setMenuOpen(false)} />
+                <div className="anim-pop absolute right-0 mt-2 w-44 rounded-xl shadow-lg py-1.5 z-20" style={{ border: `1px solid ${LINE}`, background: "var(--surface)" }}>
+                  <button onClick={handleLogout} className="w-full text-left px-3.5 py-2.5 text-[13px] hover:opacity-70 transition-colors flex items-center gap-2" style={{ color: BRICK }}>
+                    <LogOut size={14} /> {t("logout")}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      </header>
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-      {!student ? (
-        <div className="px-4"><EmptyState text={t("empty_student")} /></div>
-      ) : (
-        <div className="px-4">
-          {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} />}
-          {tab === "rating" && <RatingTab student={student} t={t} />}
-          {tab === "shop" && <ShopTab student={student} shopItems={shopItems} onRedeem={handleRedeem} redeeming={redeeming} t={t} lang={lang} />}
-          {tab === "profile" && <ProfileTab student={student} onLogout={handleLogout} t={t} lang={lang} changeLang={changeLang} theme={theme} changeTheme={changeTheme} />}
+      {toast && (
+        <div className="anim-slide fixed top-4 left-4 right-4 sm:left-auto sm:right-6 z-50 px-4 py-2.5 rounded-xl text-[13px] font-medium shadow-lg flex items-center gap-2"
+          style={{ background: toast.tone === "brick" ? BRICK : toast.tone === "gold" ? GOLD : GREEN, color: "#fff" }}>
+          <CheckCircle2 size={14} className="shrink-0" /> {toast.text}
         </div>
       )}
-
-      {/* Нижняя навигация */}
-      <div className="fixed bottom-0 left-0 right-0 px-3 pb-3 pt-2 z-20" style={{ background: "linear-gradient(to top, var(--paper) 75%, rgba(0,0,0,0))" }}>
-        <div className="flex items-center justify-around rounded-3xl px-1.5 py-1.5" style={{ background: "var(--surface)", boxShadow: "0 8px 28px rgba(26,26,23,0.14)", border: "1px solid var(--line)", backdropFilter: "blur(12px)" }}>
-          {tabsFor(t).map((tabItem) => {
-            const active = tab === tabItem.key;
-            return (
-              <button key={tabItem.key} onClick={() => setTab(tabItem.key)} className="flex-1 flex flex-col items-center gap-1 py-3 rounded-2xl transition-all duration-150 active:scale-95" style={{ background: active ? RED_L : "transparent" }}>
-                <tabItem.icon size={18} style={{ color: active ? RED_D : "#9C9A90", opacity: active ? 1 : 0.7 }} />
-                <span className="text-[10px] font-semibold" style={{ color: active ? RED_D : "#9C9A90" }}>{tabItem.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <main className="px-4 py-6 md:px-8">
+        {myTeacher ? (
+          <TeacherPortal db={data} onAction={doAction} notify={notify} myTeacher={myTeacher} t={t} lang={lang} />
+        ) : (
+          <div className="max-w-md mx-auto">
+            <EmptyState text={t("no_student_found")} />
+          </div>
+        )}
+      </main>
     </div>
   );
 }
