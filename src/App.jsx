@@ -1092,6 +1092,9 @@ export default function ParentApp() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {student?.logoUrl && (
+            <img src={student.logoUrl} alt="Global Up" className="w-9 h-9 rounded-full object-cover shrink-0" style={{ border: `1px solid ${LINE}` }} />
+          )}
           <div className="relative">
             <button onClick={() => setLangMenuOpen((v) => !v)} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-[16px] active:scale-90 transition-transform" style={{ background: "var(--surface)", border: `1px solid ${LINE}` }}>
               {LANG_FLAGS[lang]}
