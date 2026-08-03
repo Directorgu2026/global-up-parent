@@ -208,6 +208,29 @@ function ProgressCard({ log, generalGrades = [], t }) {
   );
 }
 
+function DebtPopup({ amount, adminTelegram, lang, onClose, t }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-5" style={{ background: "rgba(0,0,0,0.45)" }} onClick={onClose}>
+      <div className="anim-pop w-full max-w-sm rounded-3xl p-6 text-center" style={{ background: "var(--surface)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: RED_L }}>
+          <Wallet size={26} style={{ color: RED_D }} />
+        </div>
+        <h2 className="text-[17px] font-bold mb-2">{t("debt_popup_title")}</h2>
+        <p className="text-[13.5px] opacity-70 leading-relaxed mb-5">
+          {t("debt_popup_text", { sum: `${fmt(amount)} ${lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}` })}
+        </p>
+        {adminTelegram && (
+          <a href={`https://t.me/${adminTelegram}`} target="_blank" rel="noreferrer" className="w-full flex items-center justify-center gap-1.5 text-[13px] font-semibold py-3 rounded-2xl mb-2.5" style={{ background: "var(--soft-purple-bg-2)", color: "var(--soft-purple-fg)" }}>
+            <Megaphone size={15} /> {t("contact_admin")}
+          </a>
+        )}
+        <button onClick={onClose} className="w-full text-[13px] font-medium py-3 rounded-2xl" style={{ background: "var(--surface-alt)", color: "var(--ink)" }}>
+          {t("debt_popup_close")}
+        </button>
+      </div>
+    </div>
+  );
+}
 function ConfettiOverlay({ amount, onDone, t }) {
   useEffect(() => { const timer = setTimeout(onDone, 2800); return () => clearTimeout(timer); }, []);
   const pieces = useMemo(() => Array.from({ length: 70 }, (_, i) => ({
@@ -335,23 +358,25 @@ function HomeTab({ student, notifications = [], t, lang }) {
       )}
 
       {/* Расписание — плашка градиентом */}
-      <div className="rounded-3xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
-        <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
-        <div className="absolute -right-2 bottom-2 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
-        {student.group ? (
-          <>
-            <p className="text-[11px] font-medium opacity-80 uppercase tracking-wide">{student.group.course}</p>
-            <h2 className="text-[19px] font-bold mt-0.5">{student.group.name}</h2>
-            <div className="flex items-center gap-3 mt-3 text-[12.5px]">
-              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}><Calendar size={12} className="inline mr-1 -mt-0.5" />{scheduleText(student.group, t("no_schedule"))}</span>
-              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}><MapPin size={12} className="inline mr-1 -mt-0.5" />{student.group.room}</span>
-            </div>
-            {student.teacherName && <p className="text-[12px] mt-2 opacity-90">{t("teacher_label")}: {student.teacherName}</p>}
-          </>
-        ) : (
+      {(student.groups || []).length === 0 ? (
+        <div className="rounded-3xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
           <p className="text-[13.5px] opacity-90">{t("no_group")}</p>
-        )}
-      </div>
+        </div>
+      ) : (
+        student.groups.map((g) => (
+          <div key={g.id} className="rounded-3xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
+            <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
+            <div className="absolute -right-2 bottom-2 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
+            <p className="text-[11px] font-medium opacity-80 uppercase tracking-wide">{g.course}</p>
+            <h2 className="text-[19px] font-bold mt-0.5">{g.name}</h2>
+            <div className="flex items-center gap-3 mt-3 text-[12.5px]">
+              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}><Calendar size={12} className="inline mr-1 -mt-0.5" />{scheduleText(g, t("no_schedule"))}</span>
+              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}><MapPin size={12} className="inline mr-1 -mt-0.5" />{g.room}</span>
+            </div>
+            {g.teacherName && <p className="text-[12px] mt-2 opacity-90">{t("teacher_label")}: {g.teacherName}</p>}
+          </div>
+        ))
+      )}
 
       {/* Посещаемость и оценки */}
       <Card className="p-4">
@@ -406,14 +431,15 @@ function HomeTab({ student, notifications = [], t, lang }) {
 /* ------------------------------- Рейтинг ------------------------------- */
 function RatingTab({ student, t }) {
   const groupmates = student.groupmates || [];
-  if (!student.group) return <EmptyState text={t("rating_no_group")} icon={Trophy} />;
+  const myGroups = student.groups || [];
+  if (myGroups.length === 0) return <EmptyState text={t("rating_no_group")} icon={Trophy} />;
   const podiumBg = ["linear-gradient(135deg,#FCD34D,#F59E0B)", "linear-gradient(135deg,#D1D5DB,#9CA3AF)", "linear-gradient(135deg,#FCA5A5,#EA580C)"];
   return (
     <div className="space-y-3">
       <div className="rounded-3xl p-5 text-white text-center" style={{ background: `linear-gradient(135deg, ${GOLD}, #B45309)` }}>
         <Trophy size={26} className="mx-auto" />
         <h2 className="text-[16px] font-bold mt-1">{t("rating_title")}</h2>
-        <p className="text-[12px] opacity-85 mt-0.5">{t("rating_subtitle", { name: student.group.name })}</p>
+        <p className="text-[12px] opacity-85 mt-0.5">{t("rating_subtitle", { name: myGroups.map((g) => g.name).join(", ") })}</p>
       </div>
       {groupmates.length === 0 ? (
         <EmptyState text={t("rating_empty")} icon={GraduationCap} />
@@ -576,32 +602,43 @@ function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme
       <Card className="p-4">
         <h3 className="text-[13.5px] font-bold mb-2.5">{t("info_title")}</h3>
         <div className="space-y-2 text-[13px]">
-          <div className="flex items-center justify-between py-1.5" style={{ borderBottom: `1px solid ${LINE}` }}><span className="opacity-50">{t("group_label")}</span><span className="font-medium">{student.group?.name || "—"}</span></div>
-          <div className="flex items-center justify-between py-1.5" style={{ borderBottom: `1px solid ${LINE}` }}><span className="opacity-50">{t("course_label")}</span><span className="font-medium">{student.group?.course || "—"}</span></div>
-          <div className="flex items-center justify-between py-1.5" style={{ borderBottom: `1px solid ${LINE}` }}><span className="opacity-50">{t("teacher_label")}</span><span className="font-medium">{student.teacherName || "—"}</span></div>
+          {(student.groups || []).length === 0 ? (
+            <div className="flex items-center justify-between py-1.5"><span className="opacity-50">{t("group_label")}</span><span className="font-medium">—</span></div>
+          ) : (
+            student.groups.map((g) => (
+              <div key={g.id} className="flex items-center justify-between py-1.5" style={{ borderBottom: `1px solid ${LINE}` }}>
+                <span className="opacity-50">{g.course}</span>
+                <span className="font-medium">{g.name}{g.teacherName ? ` · ${g.teacherName}` : ""}</span>
+              </div>
+            ))
+          )}
           <div className="flex items-center justify-between py-1.5"><span className="opacity-50">{t("debt")}</span><span className="font-semibold" style={{ color: student.debt > 0 ? RED_D : GREEN_D }}>{fmt(student.debt)} {lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}</span></div>
         </div>
       </Card>
 
-      {(student.adminTelegram || student.teacherTelegram) && (
-        <Card className="p-4">
-          <h3 className="text-[13.5px] font-bold mb-2.5">{t("contact")}</h3>
-          <div className="space-y-2">
-            {student.adminTelegram && (
-              <a href={`https://t.me/${student.adminTelegram}`} target="_blank" rel="noreferrer" className="w-full flex items-center justify-between px-4 py-3 rounded-2xl" style={{ background: "var(--soft-purple-bg-2)" }}>
-                <span className="text-[13px] font-semibold" style={{ color: "var(--soft-purple-fg)" }}>{t("contact_admin")}</span>
-                <Megaphone size={16} style={{ color: "var(--soft-purple-fg)" }} />
-              </a>
-            )}
-            {student.teacherTelegram && (
-              <a href={`https://t.me/${student.teacherTelegram}`} target="_blank" rel="noreferrer" className="w-full flex items-center justify-between px-4 py-3 rounded-2xl" style={{ background: RED_L }}>
-                <span className="text-[13px] font-semibold" style={{ color: RED_D }}>{t("contact_teacher", { name: student.teacherName || t("teacher_fallback") })}</span>
-                <GraduationCap size={16} style={{ color: RED_D }} />
-              </a>
-            )}
-          </div>
-        </Card>
-      )}
+      {(() => {
+        const uniqueTeachers = [...new Map((student.groups || []).filter((g) => g.teacherTelegram).map((g) => [g.teacherTelegram, g])).values()];
+        if (!student.adminTelegram && uniqueTeachers.length === 0) return null;
+        return (
+          <Card className="p-4">
+            <h3 className="text-[13.5px] font-bold mb-2.5">{t("contact")}</h3>
+            <div className="space-y-2">
+              {student.adminTelegram && (
+                <a href={`https://t.me/${student.adminTelegram}`} target="_blank" rel="noreferrer" className="w-full flex items-center justify-between px-4 py-3 rounded-2xl" style={{ background: "var(--soft-purple-bg-2)" }}>
+                  <span className="text-[13px] font-semibold" style={{ color: "var(--soft-purple-fg)" }}>{t("contact_admin")}</span>
+                  <Megaphone size={16} style={{ color: "var(--soft-purple-fg)" }} />
+                </a>
+              )}
+              {uniqueTeachers.map((g) => (
+                <a key={g.teacherTelegram} href={`https://t.me/${g.teacherTelegram}`} target="_blank" rel="noreferrer" className="w-full flex items-center justify-between px-4 py-3 rounded-2xl" style={{ background: RED_L }}>
+                  <span className="text-[13px] font-semibold" style={{ color: RED_D }}>{t("contact_teacher", { name: g.teacherName || t("teacher_fallback") })}</span>
+                  <GraduationCap size={16} style={{ color: RED_D }} />
+                </a>
+              ))}
+            </div>
+          </Card>
+        );
+      })()}
       {(student.payments || []).length > 0 && (
         <Card className="p-4">
           <h3 className="text-[13.5px] font-bold mb-2.5">{t("recent_payments")}</h3>
@@ -764,6 +801,9 @@ const TRANSLATIONS = {
     faq_a5: "Оплата принимается администрацией центра — наличными, картой или переводом. После оплаты сумма сразу отражается в этом приложении.",
     faq_q6: "Что такое баланс и переплата?",
     faq_a6: "Если оплатили больше, чем был долг, разница сохраняется как баланс и автоматически уменьшает следующее начисление за обучение — деньги никогда не пропадают.",
+    debt_popup_title: "Есть задолженность",
+    debt_popup_text: "За обучение накопился долг — {sum}. Пожалуйста, оплатите его как можно скорее — оплата принимается администрацией центра наличными, картой или переводом.",
+    debt_popup_close: "Понятно",
   },
   en: {
     tab_home: "Home", tab_rating: "Rating", tab_shop: "Shop", tab_profile: "Profile",
@@ -813,6 +853,9 @@ const TRANSLATIONS = {
     faq_a5: "Payments are accepted by the center administration, in cash, by card, or by transfer. The amount is reflected in this app right after payment.",
     faq_q6: "What is the balance / overpayment?",
     faq_a6: "If you paid more than you owed, the difference is kept as a balance and automatically reduces your next charge. The money is never lost.",
+    debt_popup_title: "You have an outstanding balance",
+    debt_popup_text: "There is a debt of {sum} for your classes. Please pay it as soon as possible — payments are accepted by the center administration in cash, by card, or by transfer.",
+    debt_popup_close: "Got it",
   },
   uz: {
     tab_home: "Asosiy", tab_rating: "Reyting", tab_shop: "Do'kon", tab_profile: "Profil",
@@ -862,6 +905,9 @@ const TRANSLATIONS = {
     faq_a5: "To'lovlar markaz ma'muriyati tomonidan qabul qilinadi: naqd pul, karta yoki o'tkazma orqali. To'lovdan so'ng summa darhol shu ilovada ko'rinadi.",
     faq_q6: "Balans va ortiqcha to'lov nima?",
     faq_a6: "Agar qarzdan ko'proq to'lasangiz, farq balans sifatida saqlanadi va keyingi to'lovni avtomatik kamaytiradi. Pul hech qachon yo'qolmaydi.",
+    debt_popup_title: "Sizda qarz bor",
+    debt_popup_text: "O'qish uchun {sum} qarz yig'ildi. Iltimos, imkon qadar tezroq to'lang — to'lovlar markaz ma'muriyati tomonidan naqd pul, karta yoki o'tkazma orqali qabul qilinadi.",
+    debt_popup_close: "Tushunarli",
   },
 };
 function translate(lang, key, vars) {
@@ -897,6 +943,8 @@ export default function ParentApp() {
   const [toast, setToast] = useState("");
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [coinGain, setCoinGain] = useState(null); // { amount } — показывает конфетти, когда монеты выросли
+  const [showDebtPopup, setShowDebtPopup] = useState(false);
+  const debtPopupShownRef = useRef(false); // чтобы не выскакивало повторно при каждом обновлении данных в течение сеанса
   const lastCoinsRef = useRef({}); // studentId -> последний известный баланс монет
 
   // Язык и тема — выбор запоминается на этом устройстве
@@ -1021,6 +1069,13 @@ export default function ParentApp() {
 
   const student = students.find((s) => s.id === activeId);
 
+  useEffect(() => {
+    if (student && student.debt > 0 && !debtPopupShownRef.current) {
+      debtPopupShownRef.current = true;
+      setShowDebtPopup(true);
+    }
+  }, [student?.id, student?.debt]);
+
   const handleRedeem = async (itemId) => {
     if (!student) return;
     setRedeeming(true);
@@ -1076,6 +1131,9 @@ export default function ParentApp() {
       <style>{THEME_VARS}</style>
 
       {coinGain && <ConfettiOverlay amount={coinGain.amount} onDone={() => setCoinGain(null)} t={t} />}
+      {showDebtPopup && student && (
+        <DebtPopup amount={student.debt} adminTelegram={student.adminTelegram} lang={lang} onClose={() => setShowDebtPopup(false)} t={t} />
+      )}
 
       {toast && (
         <div className="fixed top-4 left-4 right-4 z-50 px-4 py-3 rounded-2xl text-[13px] font-medium text-white text-center" style={{ background: RED_D, boxShadow: "0 4px 16px rgba(0,0,0,0.2)" }}>
