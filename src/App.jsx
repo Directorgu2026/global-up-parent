@@ -53,6 +53,11 @@ const FONT_IMPORT = `
 .mono { font-variant-numeric: tabular-nums; }
 .anim-fade { animation: fadeIn 0.15s ease-out; }
 .anim-pop { animation: popIn 0.18s cubic-bezier(0.34,1.56,0.64,1); }
+.anim-info-pulse { animation: infoPulse 2.2s ease-in-out infinite; }
+@keyframes infoPulse {
+  0%, 100% { box-shadow: 0 2px 6px rgba(0,0,0,0.2), 0 0 0 0 rgba(255,255,255,0.6); }
+  50% { box-shadow: 0 2px 6px rgba(0,0,0,0.2), 0 0 0 6px rgba(255,255,255,0); }
+}
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes popIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
 body { -webkit-tap-highlight-color: transparent; }
@@ -356,8 +361,8 @@ function HomeTab({ student, notifications = [], t, lang }) {
           <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
           <div className="flex items-center justify-between">
             <CoinsIcon size={19} className="opacity-90" />
-            <button onClick={() => setShowCoinsInfo(true)} className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(255,255,255,0.25)" }}>
-              <Info size={11} />
+            <button onClick={() => setShowCoinsInfo(true)} className="anim-info-pulse w-8 h-8 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={{ background: "#fff", boxShadow: "0 2px 6px rgba(0,0,0,0.2)" }}>
+              <Info size={17} strokeWidth={2.5} style={{ color: "#B45309" }} />
             </button>
           </div>
           <p className="text-[10.5px] font-medium opacity-85 uppercase tracking-wide mt-2">{t("coins")}</p>
@@ -522,15 +527,15 @@ function ShopTab({ student, shopItems, onRedeem, redeeming, t, lang }) {
     <div className="space-y-3">
       <div className="rounded-3xl p-5 text-white flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
         <div>
-          <div className="flex items-center gap-1.5">
-            <p className="text-[11px] font-medium opacity-80 uppercase tracking-wide">{t("your_balance")}</p>
-            <button onClick={() => setShowCoinsInfo(true)} className="w-4.5 h-4.5 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(255,255,255,0.25)", width: 18, height: 18 }}>
-              <Info size={10} />
-            </button>
-          </div>
+          <p className="text-[11px] font-medium opacity-80 uppercase tracking-wide">{t("your_balance")}</p>
           <h2 className="text-[26px] font-extrabold mt-0.5">{student.coins} <span className="text-[15px] font-semibold opacity-90">GC</span></h2>
         </div>
-        <CoinsIcon size={30} className="opacity-90" />
+        <div className="flex flex-col items-center gap-1.5">
+          <CoinsIcon size={30} className="opacity-90" />
+          <button onClick={() => setShowCoinsInfo(true)} className="anim-info-pulse w-8 h-8 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={{ background: "#fff", boxShadow: "0 2px 6px rgba(0,0,0,0.2)" }}>
+            <Info size={17} strokeWidth={2.5} style={{ color: RED_D }} />
+          </button>
+        </div>
       </div>
       {showCoinsInfo && <CoinsInfoPopup onClose={() => setShowCoinsInfo(false)} t={t} />}
       {shopItems.length === 0 ? (
