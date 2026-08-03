@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
   FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
-  Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone, PiggyBank,
+  Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone, PiggyBank, Info, Users, X,
 } from "lucide-react";
 
 /* ------------------------------ Настройка ------------------------------ */
@@ -208,6 +208,37 @@ function ProgressCard({ log, generalGrades = [], t }) {
   );
 }
 
+function CoinsInfoPopup({ onClose, t }) {
+  const items = [
+    { icon: Users, bg: "var(--soft-yellow-bg)", fg: "var(--soft-yellow-fg)", title: t("coins_info_referral_title"), text: t("coins_info_referral_text"), highlight: true },
+    { icon: GraduationCap, bg: "var(--soft-green-bg)", fg: GREEN_D, title: t("coins_info_grades_title"), text: t("coins_info_grades_text") },
+    { icon: Flame, bg: "var(--soft-blue-bg)", fg: "#1D4ED8", title: t("coins_info_attendance_title"), text: t("coins_info_attendance_text") },
+    { icon: Trophy, bg: "var(--soft-purple-bg)", fg: "var(--soft-purple-fg)", title: t("coins_info_achievements_title"), text: t("coins_info_achievements_text") },
+  ];
+  return (
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-5" style={{ background: "rgba(0,0,0,0.45)" }} onClick={onClose}>
+      <div className="anim-pop w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6 max-h-[85vh] overflow-y-auto" style={{ background: "var(--surface)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-[16px] font-bold flex items-center gap-2"><CoinsIcon size={18} style={{ color: GOLD }} />{t("coins_info_title")}</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }}><X size={15} /></button>
+        </div>
+        <div className="space-y-2.5">
+          {items.map((item, i) => (
+            <div key={i} className="p-3.5 rounded-2xl flex items-start gap-3" style={{ background: item.bg, border: item.highlight ? `1.5px solid ${GOLD}` : "none" }}>
+              <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(255,255,255,0.5)" }}>
+                <item.icon size={16} style={{ color: item.fg }} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[13px] font-bold" style={{ color: item.fg }}>{item.title}</div>
+                <div className="text-[12px] mt-0.5 leading-snug opacity-80" style={{ color: item.fg }}>{item.text}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 function DebtPopup({ amount, adminTelegram, lang, onClose, t }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-5" style={{ background: "rgba(0,0,0,0.45)" }} onClick={onClose}>
@@ -263,6 +294,7 @@ function ConfettiOverlay({ amount, onDone, t }) {
 
 function HomeTab({ student, notifications = [], t, lang }) {
   const locale = LOCALE_OF[lang] || "ru-RU";
+  const [showCoinsInfo, setShowCoinsInfo] = useState(false);
   const log = [...(student.attendanceLog || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   const total = log.length;
   const present = log.filter((r) => r.present).length;
@@ -322,7 +354,12 @@ function HomeTab({ student, notifications = [], t, lang }) {
         </div>
         <div className="rounded-3xl p-4 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${GOLD}, #B45309)` }}>
           <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
-          <CoinsIcon size={19} className="opacity-90" />
+          <div className="flex items-center justify-between">
+            <CoinsIcon size={19} className="opacity-90" />
+            <button onClick={() => setShowCoinsInfo(true)} className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(255,255,255,0.25)" }}>
+              <Info size={11} />
+            </button>
+          </div>
           <p className="text-[10.5px] font-medium opacity-85 uppercase tracking-wide mt-2">{t("coins")}</p>
           <div className="text-[16px] font-extrabold mt-0.5 leading-tight">{student.coins}<span className="text-[10.5px] font-medium opacity-80 ml-1">GC</span></div>
         </div>
@@ -424,6 +461,7 @@ function HomeTab({ student, notifications = [], t, lang }) {
           </div>
         )}
       </Card>
+      {showCoinsInfo && <CoinsInfoPopup onClose={() => setShowCoinsInfo(false)} t={t} />}
     </div>
   );
 }
@@ -477,17 +515,24 @@ function RatingTab({ student, t }) {
 function ShopTab({ student, shopItems, onRedeem, redeeming, t, lang }) {
   const locale = LOCALE_OF[lang] || "ru-RU";
   const [confirmId, setConfirmId] = useState(null);
+  const [showCoinsInfo, setShowCoinsInfo] = useState(false);
   const sorted = [...shopItems].sort((a, b) => (student.coins >= a.cost) === (student.coins >= b.cost) ? a.cost - b.cost : (student.coins >= a.cost ? -1 : 1));
   const orders = [...(student.myOrders || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   return (
     <div className="space-y-3">
       <div className="rounded-3xl p-5 text-white flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
         <div>
-          <p className="text-[11px] font-medium opacity-80 uppercase tracking-wide">{t("your_balance")}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-[11px] font-medium opacity-80 uppercase tracking-wide">{t("your_balance")}</p>
+            <button onClick={() => setShowCoinsInfo(true)} className="w-4.5 h-4.5 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(255,255,255,0.25)", width: 18, height: 18 }}>
+              <Info size={10} />
+            </button>
+          </div>
           <h2 className="text-[26px] font-extrabold mt-0.5">{student.coins} <span className="text-[15px] font-semibold opacity-90">GC</span></h2>
         </div>
         <CoinsIcon size={30} className="opacity-90" />
       </div>
+      {showCoinsInfo && <CoinsInfoPopup onClose={() => setShowCoinsInfo(false)} t={t} />}
       {shopItems.length === 0 ? (
         <EmptyState text={t("shop_empty")} icon={ShoppingBag} />
       ) : (
@@ -790,7 +835,7 @@ const TRANSLATIONS = {
     server_unreachable: "Нет связи с сервером: {msg}",
     faq_title: "Вопросы и ответы",
     faq_q1: "Как начисляются GlobalCoins?",
-    faq_a1: "Учитель начисляет монеты за оценки и активность на занятии, за хорошую посещаемость без пропусков, а также за успехи и конкретные достижения — например, победы на олимпиадах или высокие баллы на тестах.",
+    faq_a1: "Учитель начисляет монеты за оценки и активность на занятии, за хорошую посещаемость без пропусков, за успехи и достижения, а также 200 монет за каждого приведённого друга, который начал заниматься — подробнее смотрите на главном экране рядом с балансом монет (значок «i»).",
     faq_q2: "Что будет, если пропустить занятие без уважительной причины?",
     faq_a2: "Это отмечается в журнале посещаемости, но урок всё равно нужно оплатить — как за проведённый. Освобождает от оплаты только пропуск по уважительной причине, отмеченный учителем.",
     faq_q3: "Что делать, если заранее знаю, что пропущу занятие по болезни или другой уважительной причине?",
@@ -804,6 +849,15 @@ const TRANSLATIONS = {
     debt_popup_title: "Есть задолженность",
     debt_popup_text: "За обучение накопился долг — {sum}. Пожалуйста, оплатите его как можно скорее — оплата принимается администрацией центра наличными, картой или переводом.",
     debt_popup_close: "Понятно",
+    coins_info_title: "Как заработать GlobalCoins",
+    coins_info_referral_title: "Позовите друга — 200 GC",
+    coins_info_referral_text: "За каждого друга, который придёт в Global Up по вашей рекомендации и начнёт заниматься — 200 GlobalCoins. Количество друзей не ограничено — приводите сколько угодно. Скажите администрации, кто вас позвал, когда друг придёт записываться.",
+    coins_info_grades_title: "Оценки и активность",
+    coins_info_grades_text: "Учитель начисляет монеты за хорошие оценки и активность на занятии.",
+    coins_info_attendance_title: "Посещаемость",
+    coins_info_attendance_text: "За хорошую посещаемость без пропусков.",
+    coins_info_achievements_title: "Успехи и достижения",
+    coins_info_achievements_text: "Победы на олимпиадах, высокие баллы на тестах и другие достижения.",
   },
   en: {
     tab_home: "Home", tab_rating: "Rating", tab_shop: "Shop", tab_profile: "Profile",
@@ -842,7 +896,7 @@ const TRANSLATIONS = {
     server_unreachable: "No connection to server: {msg}",
     faq_title: "Questions & answers",
     faq_q1: "How are GlobalCoins awarded?",
-    faq_a1: "The teacher awards coins for grades and activity in class, for good attendance without misses, and for achievements — such as winning olympiads or high test scores.",
+    faq_a1: "The teacher awards coins for grades and activity in class, for good attendance without misses, for achievements, and 200 coins for every friend you refer who starts studying — see details on the home screen next to the coins balance (the «i» icon).",
     faq_q2: "What happens if I miss a class without an excused reason?",
     faq_a2: "It is marked in the attendance log, but the lesson still has to be paid for, as if you attended. Only an excused absence, marked by the teacher, is free of charge.",
     faq_q3: "What should I do if I know in advance I will miss a class due to illness or another valid reason?",
@@ -856,6 +910,15 @@ const TRANSLATIONS = {
     debt_popup_title: "You have an outstanding balance",
     debt_popup_text: "There is a debt of {sum} for your classes. Please pay it as soon as possible — payments are accepted by the center administration in cash, by card, or by transfer.",
     debt_popup_close: "Got it",
+    coins_info_title: "How to earn GlobalCoins",
+    coins_info_referral_title: "Invite a friend — 200 GC",
+    coins_info_referral_text: "For every friend who joins Global Up on your recommendation and starts studying — 200 GlobalCoins. No limit on the number of friends — invite as many as you like. Tell the administration who invited you when your friend enrolls.",
+    coins_info_grades_title: "Grades and activity",
+    coins_info_grades_text: "The teacher awards coins for good grades and activity in class.",
+    coins_info_attendance_title: "Attendance",
+    coins_info_attendance_text: "For good attendance without missing classes.",
+    coins_info_achievements_title: "Achievements",
+    coins_info_achievements_text: "Wins at olympiads, high test scores, and other achievements.",
   },
   uz: {
     tab_home: "Asosiy", tab_rating: "Reyting", tab_shop: "Do'kon", tab_profile: "Profil",
@@ -894,7 +957,7 @@ const TRANSLATIONS = {
     server_unreachable: "Server bilan aloqa yo'q: {msg}",
     faq_title: "Savol-javoblar",
     faq_q1: "GlobalCoins qanday beriladi?",
-    faq_a1: "O'qituvchi darsdagi baho va faollik uchun, qoldirilmagan davomat uchun, shuningdek yutuqlar uchun (masalan, olimpiadalarda g'alaba yoki testlardan yuqori ball uchun) coin beradi.",
+    faq_a1: "O'qituvchi darsdagi baho va faollik uchun, qoldirilmagan davomat uchun, yutuqlar uchun, shuningdek taklif qilgan har bir do'stingiz o'qishni boshlasa 200 coin beradi — batafsil bosh ekranda coin balansi yonidagi «i» belgisida.",
     faq_q2: "Uzrli sababsiz darsni qoldirsam nima bo'ladi?",
     faq_a2: "Bu davomat jurnaliga qayd etiladi, lekin dars baribir to'lanishi kerak, xuddi qatnashgandek. Faqat o'qituvchi tomonidan uzrli deb belgilangan sabab to'lovdan ozod qiladi.",
     faq_q3: "Kasallik yoki boshqa uzrli sabab bilan darsni oldindan qoldirishimni bilsam, nima qilishim kerak?",
@@ -908,6 +971,15 @@ const TRANSLATIONS = {
     debt_popup_title: "Sizda qarz bor",
     debt_popup_text: "O'qish uchun {sum} qarz yig'ildi. Iltimos, imkon qadar tezroq to'lang — to'lovlar markaz ma'muriyati tomonidan naqd pul, karta yoki o'tkazma orqali qabul qilinadi.",
     debt_popup_close: "Tushunarli",
+    coins_info_title: "GlobalCoins qanday topiladi",
+    coins_info_referral_title: "Do'stingizni taklif qiling — 200 GC",
+    coins_info_referral_text: "Sizning tavsiyangiz bilan Global Up'ga kelib o'qishni boshlagan har bir do'stingiz uchun — 200 GlobalCoins. Do'stlar soni cheklanmagan — xohlagancha taklif qiling. Do'stingiz ro'yxatdan o'tayotganda kim taklif qilganini ma'muriyatga ayting.",
+    coins_info_grades_title: "Baholar va faollik",
+    coins_info_grades_text: "O'qituvchi darsda yaxshi baho va faollik uchun coin beradi.",
+    coins_info_attendance_title: "Davomat",
+    coins_info_attendance_text: "Darslarni qoldirmasdan yaxshi davomat uchun.",
+    coins_info_achievements_title: "Yutuqlar",
+    coins_info_achievements_text: "Olimpiadalardagi g'alabalar, testlardan yuqori ballar va boshqa yutuqlar.",
   },
 };
 function translate(lang, key, vars) {
