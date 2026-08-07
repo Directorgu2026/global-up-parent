@@ -9,6 +9,45 @@ import {
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
 
+/* ------------------------- Надёжное хранилище -------------------------
+   Внутри Telegram обычный localStorage иногда сбрасывается между сеансами
+   (особенно на iPhone) — поэтому логин/пароль там ненадёжно запоминались.
+   Telegram.WebApp.CloudStorage хранит данные на серверах Telegram, привязано
+   к аккаунту пользователя и не подвержено такой очистке. Используем его как
+   основное хранилище, а localStorage — как быстрый локальный кэш и запасной
+   вариант вне Telegram (обычный браузер). */
+function storageSet(key, value) {
+  try {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (tg && tg.CloudStorage) tg.CloudStorage.setItem(key, value, () => {});
+  } catch {}
+  try { localStorage.setItem(key, value); } catch {}
+}
+function storageGet(key) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (val) => { if (done) return; done = true; resolve(val || ""); };
+    let localVal = "";
+    try { localVal = localStorage.getItem(key) || ""; } catch {}
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (tg && tg.CloudStorage) {
+      try {
+        tg.CloudStorage.getItem(key, (err, val) => { finish(!err && val ? val : localVal); });
+        setTimeout(() => finish(localVal), 1500); // на случай, если Telegram не ответит
+        return;
+      } catch {}
+    }
+    finish(localVal);
+  });
+}
+function storageRemove(key) {
+  try {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (tg && tg.CloudStorage) tg.CloudStorage.removeItem(key, () => {});
+  } catch {}
+  try { localStorage.removeItem(key); } catch {}
+}
+
 /* ------------------------------ Стиль/тема ------------------------------ */
 const INK = "var(--ink)";
 const PAPER = "var(--paper)";
@@ -1062,7 +1101,7 @@ export default function ParentApp() {
       setActiveId(data.students[0]?.id || null);
       setPhase("ready");
       if (phoneVal && passwordVal) {
-        try { localStorage.setItem("gu_phone", phoneVal); localStorage.setItem("gu_password", passwordVal); } catch {}
+        storageSet("gu_phone", phoneVal); storageSet("gu_password", passwordVal);
       }
     } catch (e) {
       setErrorMsg(String(e?.message || e));
@@ -1106,8 +1145,8 @@ export default function ParentApp() {
         return;
       }
       // Не привязан — пробуем логин/пароль, сохранённые с прошлого раза на этом устройстве.
-      let savedPhone = "", savedPassword = "";
-      try { savedPhone = localStorage.getItem("gu_phone") || ""; savedPassword = localStorage.getItem("gu_password") || ""; } catch {}
+      const savedPhone = await storageGet("gu_phone");
+      const savedPassword = await storageGet("gu_password");
       if (savedPhone && savedPassword) {
         setPhone(savedPhone); setPassword(savedPassword);
         await loadWithCreds(data0, savedPhone, savedPassword);
@@ -1140,7 +1179,7 @@ export default function ParentApp() {
     setStudents([]);
     lastCoinsRef.current = {};
     setPhone(""); setPassword(""); setLoginError("");
-    try { localStorage.removeItem("gu_phone"); localStorage.removeItem("gu_password"); } catch {}
+    storageRemove("gu_phone"); storageRemove("gu_password");
     setPhase("not_linked");
   };
 
