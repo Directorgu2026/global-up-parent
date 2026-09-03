@@ -3,6 +3,7 @@ import {
   Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
   FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
   Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone, PiggyBank, Info, Users, X,
+  Upload, Paperclip, Loader2, MessageCircle,
 } from "lucide-react";
 
 /* ------------------------------ Настройка ------------------------------ */
@@ -135,6 +136,65 @@ async function fetchMyData(initData, phone, password, redeemItemId, redeemStuden
   } finally {
     clearTimeout(timeout);
   }
+}
+
+// Сдача ДЗ — свой запрос, таймаут больше (загрузка файлов может занять чуть больше времени,
+// особенно на медленном мобильном интернете).
+async function submitHomeworkRequest(initData, phone, password, submitHomework) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+  let curLang = "ru";
+  try { curLang = localStorage.getItem("gu_lang") || "ru"; } catch {}
+  try {
+    const res = await fetch(EDGE_FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+      body: JSON.stringify({ initData, phone, password, submitHomework }),
+      signal: controller.signal,
+    });
+    return await res.json();
+  } catch (e) {
+    if (e.name === "AbortError") return { error: translate(curLang, "server_timeout") };
+    return { error: translate(curLang, "server_unreachable", { msg: String(e?.message || e) }) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Сжимаем фото перед отправкой — чтобы не грузить огромные снимки с телефона "как есть"
+// (это было бы медленно и дорого по трафику). Уменьшаем до разумного размера и сохраняем в JPEG.
+function fileToUploadPayload(file) {
+  return new Promise((resolve, reject) => {
+    const isImage = file.type.startsWith("image/");
+    if (!isImage) {
+      // Не картинка (PDF, Word и т.п.) — отправляем как есть, без сжатия.
+      const reader = new FileReader();
+      reader.onload = () => resolve({ name: file.name, type: file.type, dataBase64: reader.result.split(",")[1] });
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+      return;
+    }
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => { img.src = reader.result; };
+    reader.onerror = reject;
+    img.onload = () => {
+      const maxDim = 1600;
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
+      resolve({ name: file.name.replace(/\.\w+$/, ".jpg"), type: "image/jpeg", dataBase64: dataUrl.split(",")[1] });
+    };
+    img.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 /* -------------------------------- UI-атомы -------------------------------- */
@@ -336,7 +396,85 @@ function ConfettiOverlay({ amount, onDone, t }) {
   );
 }
 
-function HomeTab({ student, notifications = [], t, lang }) {
+// Сдача ДЗ прямо под заданием: если уже отправлено — показываем статус и файлы;
+// если ещё нет — маленькая форма (файлы + комментарий), разворачивается по кнопке.
+function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
+  const [expanded, setExpanded] = useState(false);
+  const [files, setFiles] = useState([]);
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const mySubmissions = (student.homework || []).filter((h) => h.materialId === material.id);
+
+  const handleFilesPicked = (e) => {
+    const picked = Array.from(e.target.files || []).slice(0, 5);
+    setFiles(picked);
+  };
+
+  const handleSubmit = async () => {
+    if (submitting) return;
+    if (files.length === 0 && !note.trim()) return;
+    setSubmitting(true);
+    const res = await onSubmitHomework({ groupId: material.groupId, materialId: material.id, note, fileList: files });
+    setSubmitting(false);
+    if (res.ok) {
+      setExpanded(false);
+      setFiles([]);
+      setNote("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="mt-2.5 pt-2.5" style={{ borderTop: "1px dashed var(--soft-yellow-border)" }}>
+      {mySubmissions.map((h) => (
+        <div key={h.id} className="mb-2 p-2.5 rounded-xl" style={{ background: "var(--surface)" }}>
+          <div className="flex items-center gap-1.5 text-[11.5px] font-semibold" style={{ color: h.status === "reviewed" ? GREEN_D : "#B45309" }}>
+            {h.status === "reviewed" ? <CheckCircle2 size={13} /> : <Clock size={13} />}
+            {h.status === "reviewed" ? t("homework_reviewed") : t("homework_pending")}
+            <span className="opacity-50 font-normal ml-auto">{new Date(h.submittedAt).toLocaleDateString(locale, { day: "2-digit", month: "short" })}</span>
+          </div>
+          {h.note && <div className="text-[12.5px] mt-1 opacity-80">{h.note}</div>}
+          {h.files?.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {h.files.map((f, i) => (
+                <a key={i} href={f.url} target="_blank" rel="noreferrer" className="text-[11px] font-medium px-2 py-1 rounded-lg flex items-center gap-1" style={{ background: "var(--surface-alt)" }}>
+                  <Paperclip size={11} />{f.name.length > 16 ? f.name.slice(0, 14) + "…" : f.name}
+                </a>
+              ))}
+            </div>
+          )}
+          {h.status === "reviewed" && h.teacherComment && (
+            <div className="text-[12.5px] mt-1.5 p-2 rounded-lg flex items-start gap-1.5" style={{ background: "var(--soft-green-bg, #DCFCE7)" }}>
+              <MessageCircle size={13} className="shrink-0 mt-0.5" />{h.teacherComment}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {!expanded ? (
+        <button onClick={() => setExpanded(true)} className="w-full text-[12.5px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5" style={{ background: "var(--surface)", color: BLUE }}>
+          <Upload size={14} />{mySubmissions.length > 0 ? t("homework_submit_again") : t("homework_submit")}
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx" multiple onChange={handleFilesPicked} className="text-[11.5px] w-full" />
+          {files.length > 0 && <div className="text-[11px] opacity-60">{t("homework_files_count", { n: files.length })}</div>}
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("homework_note_placeholder")} rows={2} className="w-full text-[12.5px] px-3 py-2 rounded-xl outline-none" style={{ background: "var(--surface)", border: "1px solid var(--line)" }} />
+          <div className="flex gap-2">
+            <button onClick={handleSubmit} disabled={submitting || (files.length === 0 && !note.trim())} className="flex-1 text-[12.5px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 text-white disabled:opacity-50" style={{ background: RED }}>
+              {submitting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}{t("homework_send")}
+            </button>
+            <button onClick={() => { setExpanded(false); setFiles([]); setNote(""); }} className="px-3.5 py-2 rounded-xl text-[12.5px] font-medium" style={{ background: "var(--surface)" }}>{t("cancel")}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
   const locale = LOCALE_OF[lang] || "ru-RU";
   const [showCoinsInfo, setShowCoinsInfo] = useState(false);
   const log = [...(student.attendanceLog || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -500,6 +638,7 @@ function HomeTab({ student, notifications = [], t, lang }) {
                 <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#B45309" }}>{new Date(m.date).toLocaleDateString(locale, { day: "2-digit", month: "long" })}</div>
                 {m.text && <div className="text-[13px] mt-1 leading-snug">{m.text}</div>}
                 {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-medium flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} className="inline mr-1 -mt-0.5" />{t("open_material")}</a>}
+                <HomeworkSubmitBox material={m} student={student} onSubmitHomework={onSubmitHomework} t={t} locale={locale} />
               </div>
             ))}
           </div>
@@ -854,6 +993,10 @@ const TRANSLATIONS = {
     no_group: "Пока не закреплена группа", teacher_label: "Преподаватель",
     attendance_grades: "Посещаемость и оценки", no_attendance: "Пока нет отметок посещаемости",
     homework: "Домашнее задание", no_homework: "Пока нет домашних заданий", open_material: "Открыть материал",
+    homework_submit: "Сдать работу", homework_submit_again: "Отправить ещё раз",
+    homework_pending: "Отправлено — ожидает проверки", homework_reviewed: "Проверено",
+    homework_files_count: "Файлов выбрано: {n}", homework_note_placeholder: "Комментарий (необязательно)",
+    homework_send: "Отправить", cancel: "Отмена", homework_sent: "Домашнее задание отправлено",
     important_notice: "Важное уведомление",
     your_balance: "Ваш баланс", shop_empty: "Магазин пока пуст", buy: "Купить", buy_confirm: "Точно купить?",
     missing_gc: "Ещё {sum} GC", shop_hint: "После покупки заявка сразу видна администратору и директору — просто дождитесь, когда вам выдадут награду.",
@@ -915,6 +1058,10 @@ const TRANSLATIONS = {
     no_group: "No group assigned yet", teacher_label: "Teacher",
     attendance_grades: "Attendance & grades", no_attendance: "No attendance records yet",
     homework: "Homework", no_homework: "No homework yet", open_material: "Open material",
+    homework_submit: "Submit work", homework_submit_again: "Submit again",
+    homework_pending: "Submitted — awaiting review", homework_reviewed: "Reviewed",
+    homework_files_count: "Files selected: {n}", homework_note_placeholder: "Comment (optional)",
+    homework_send: "Send", cancel: "Cancel", homework_sent: "Homework submitted",
     important_notice: "Important notice",
     your_balance: "Your balance", shop_empty: "Shop is empty for now", buy: "Buy", buy_confirm: "Confirm purchase?",
     missing_gc: "{sum} GC more needed", shop_hint: "After purchase, the admin and director see your request right away — just wait for them to hand over the reward.",
@@ -976,6 +1123,10 @@ const TRANSLATIONS = {
     no_group: "Hali guruh biriktirilmagan", teacher_label: "O'qituvchi",
     attendance_grades: "Davomat va baholar", no_attendance: "Hozircha davomat belgilari yo'q",
     homework: "Uyga vazifa", no_homework: "Hozircha uyga vazifa yo'q", open_material: "Materialni ochish",
+    homework_submit: "Ishni topshirish", homework_submit_again: "Yana yuborish",
+    homework_pending: "Yuborildi — tekshiruv kutilmoqda", homework_reviewed: "Tekshirildi",
+    homework_files_count: "Tanlangan fayllar: {n}", homework_note_placeholder: "Izoh (ixtiyoriy)",
+    homework_send: "Yuborish", cancel: "Bekor qilish", homework_sent: "Uyga vazifa yuborildi",
     important_notice: "Muhim xabar",
     your_balance: "Balansingiz", shop_empty: "Do'kon hozircha bo'sh", buy: "Sotib olish", buy_confirm: "Rostdan sotib olasizmi?",
     missing_gc: "Yana {sum} GC kerak", shop_hint: "Xarid qilingandan so'ng ariza darhol administrator va direktorga ko'rinadi — sovg'a topshirilishini kuting.",
@@ -1209,6 +1360,30 @@ export default function ParentApp() {
     }
   };
 
+  const handleSubmitHomework = async ({ groupId, materialId, note, fileList }) => {
+    if (!student) return { ok: false };
+    try {
+      const files = [];
+      for (const f of fileList || []) files.push(await fileToUploadPayload(f));
+      const data = await submitHomeworkRequest(initData, phone.trim() || null, password.trim() || null, {
+        studentId: student.id, groupId, materialId, note, files,
+      });
+      if (data.error) { setToast(data.error); setTimeout(() => setToast(""), 3500); return { ok: false }; }
+      if (!data.linked) { setToast(t("identity_error")); setTimeout(() => setToast(""), 4000); return { ok: false }; }
+      if (data.submitted) {
+        applyStudents(data.students);
+        setToast(t("homework_sent"));
+        setTimeout(() => setToast(""), 3000);
+        return { ok: true };
+      }
+      return { ok: false };
+    } catch (e) {
+      setToast(t("server_unreachable", { msg: String(e?.message || e) }));
+      setTimeout(() => setToast(""), 3500);
+      return { ok: false };
+    }
+  };
+
   if (phase === "loading") {
     return (
       <div className={`theme-${theme} min-h-screen flex items-center justify-center`} style={{ background: PAPER }}>
@@ -1307,7 +1482,7 @@ export default function ParentApp() {
         <div className="px-4"><EmptyState text={t("empty_student")} /></div>
       ) : (
         <div className="px-4">
-          {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} />}
+          {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} />}
           {tab === "rating" && <RatingTab student={student} t={t} />}
           {tab === "shop" && <ShopTab student={student} shopItems={shopItems} onRedeem={handleRedeem} redeeming={redeeming} t={t} lang={lang} />}
           {tab === "profile" && <ProfileTab student={student} onLogout={handleLogout} t={t} lang={lang} changeLang={changeLang} theme={theme} changeTheme={changeTheme} />}
