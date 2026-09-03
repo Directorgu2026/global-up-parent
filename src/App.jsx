@@ -3,7 +3,7 @@ import {
   Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
   FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
   Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone, PiggyBank, Info, Users, X,
-  Upload, Paperclip, Loader2, MessageCircle,
+  Upload, Paperclip, Loader2, MessageCircle, Image as ImageIcon,
 } from "lucide-react";
 
 /* ------------------------------ Настройка ------------------------------ */
@@ -65,6 +65,13 @@ const PURPLE = "#7C3AED";
 const LINE = "var(--line)";
 
 const THEME_VARS = `
+  html, body {
+    touch-action: pan-x pan-y;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    overscroll-behavior-y: contain;
+  }
+  input, textarea, select { font-size: 16px !important; }
   .theme-light {
     --paper: #F7F5F0; --ink: #1A1A17; --line: #EDEBE4; --surface: #FFFFFF;
     --surface-soft: #F6F7FB; --surface-alt: #EEEEE8;
@@ -403,14 +410,18 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
   const [files, setFiles] = useState([]);
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const fileInputRef = useRef(null);
+  const photoInputRef = useRef(null);
+  const docInputRef = useRef(null);
 
   const mySubmissions = (student.homework || []).filter((h) => h.materialId === material.id);
 
-  const handleFilesPicked = (e) => {
-    const picked = Array.from(e.target.files || []).slice(0, 5);
-    setFiles(picked);
+  // Важно: на iPhone, если смешать типы "фото" и "документы" в ОДНОМ поле выбора файла
+  // (accept="image/*,.pdf,..."), система иногда прячет вариант "Галерея" и показывает только
+  // "Файлы". Поэтому — два отдельных, ясно подписанных поля вместо одного смешанного.
+  const addFiles = (picked) => {
+    setFiles((prev) => [...prev, ...Array.from(picked || [])].slice(0, 5));
   };
+  const removeFile = (idx) => setFiles((prev) => prev.filter((_, i) => i !== idx));
 
   const handleSubmit = async () => {
     if (submitting) return;
@@ -422,7 +433,8 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
       setExpanded(false);
       setFiles([]);
       setNote("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (photoInputRef.current) photoInputRef.current.value = "";
+      if (docInputRef.current) docInputRef.current.value = "";
     }
   };
 
@@ -459,8 +471,27 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
         </button>
       ) : (
         <div className="space-y-2">
-          <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx" multiple onChange={handleFilesPicked} className="text-[11.5px] w-full" />
-          {files.length > 0 && <div className="text-[11px] opacity-60">{t("homework_files_count", { n: files.length })}</div>}
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[12.5px] font-semibold py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer" style={{ background: "var(--surface)", border: "1px solid var(--line)" }}>
+              <ImageIcon size={15} />{t("homework_pick_photo")}
+              <input ref={photoInputRef} type="file" accept="image/*" multiple onChange={(e) => addFiles(e.target.files)} className="hidden" />
+            </label>
+            <label className="text-[12.5px] font-semibold py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer" style={{ background: "var(--surface)", border: "1px solid var(--line)" }}>
+              <Paperclip size={15} />{t("homework_pick_file")}
+              <input ref={docInputRef} type="file" accept=".pdf,.doc,.docx" multiple onChange={(e) => addFiles(e.target.files)} className="hidden" />
+            </label>
+          </div>
+          {files.length > 0 && (
+            <div className="space-y-1">
+              {files.map((f, i) => (
+                <div key={i} className="flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg" style={{ background: "var(--surface-alt)" }}>
+                  <Paperclip size={11} className="shrink-0" />
+                  <span className="truncate flex-1">{f.name}</span>
+                  <button onClick={() => removeFile(i)} className="shrink-0 opacity-60"><X size={13} /></button>
+                </div>
+              ))}
+            </div>
+          )}
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("homework_note_placeholder")} rows={2} className="w-full text-[12.5px] px-3 py-2 rounded-xl outline-none" style={{ background: "var(--surface)", border: "1px solid var(--line)" }} />
           <div className="flex gap-2">
             <button onClick={handleSubmit} disabled={submitting || (files.length === 0 && !note.trim())} className="flex-1 text-[12.5px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 text-white disabled:opacity-50" style={{ background: RED }}>
@@ -995,7 +1026,7 @@ const TRANSLATIONS = {
     homework: "Домашнее задание", no_homework: "Пока нет домашних заданий", open_material: "Открыть материал",
     homework_submit: "Сдать работу", homework_submit_again: "Отправить ещё раз",
     homework_pending: "Отправлено — ожидает проверки", homework_reviewed: "Проверено",
-    homework_files_count: "Файлов выбрано: {n}", homework_note_placeholder: "Комментарий (необязательно)",
+    homework_pick_photo: "Фото", homework_pick_file: "Файл", homework_note_placeholder: "Комментарий (необязательно)",
     homework_send: "Отправить", cancel: "Отмена", homework_sent: "Домашнее задание отправлено",
     important_notice: "Важное уведомление",
     your_balance: "Ваш баланс", shop_empty: "Магазин пока пуст", buy: "Купить", buy_confirm: "Точно купить?",
@@ -1060,7 +1091,7 @@ const TRANSLATIONS = {
     homework: "Homework", no_homework: "No homework yet", open_material: "Open material",
     homework_submit: "Submit work", homework_submit_again: "Submit again",
     homework_pending: "Submitted — awaiting review", homework_reviewed: "Reviewed",
-    homework_files_count: "Files selected: {n}", homework_note_placeholder: "Comment (optional)",
+    homework_pick_photo: "Photo", homework_pick_file: "File", homework_note_placeholder: "Comment (optional)",
     homework_send: "Send", cancel: "Cancel", homework_sent: "Homework submitted",
     important_notice: "Important notice",
     your_balance: "Your balance", shop_empty: "Shop is empty for now", buy: "Buy", buy_confirm: "Confirm purchase?",
@@ -1125,7 +1156,7 @@ const TRANSLATIONS = {
     homework: "Uyga vazifa", no_homework: "Hozircha uyga vazifa yo'q", open_material: "Materialni ochish",
     homework_submit: "Ishni topshirish", homework_submit_again: "Yana yuborish",
     homework_pending: "Yuborildi — tekshiruv kutilmoqda", homework_reviewed: "Tekshirildi",
-    homework_files_count: "Tanlangan fayllar: {n}", homework_note_placeholder: "Izoh (ixtiyoriy)",
+    homework_pick_photo: "Foto", homework_pick_file: "Fayl", homework_note_placeholder: "Izoh (ixtiyoriy)",
     homework_send: "Yuborish", cancel: "Bekor qilish", homework_sent: "Uyga vazifa yuborildi",
     important_notice: "Muhim xabar",
     your_balance: "Balansingiz", shop_empty: "Do'kon hozircha bo'sh", buy: "Sotib olish", buy_confirm: "Rostdan sotib olasizmi?",
@@ -1276,6 +1307,17 @@ export default function ParentApp() {
   };
 
   useEffect(() => {
+    // Запрещаем зум страницы (иначе на iPhone/Android при определённых жестах или при фокусе
+    // на поле ввода экран мог неожиданно "приближаться" и увеличиваться) — правим тег viewport
+    // прямо здесь в коде, чтобы не зависеть от отдельного файла index.html.
+    let viewportTag = document.querySelector('meta[name="viewport"]');
+    if (!viewportTag) {
+      viewportTag = document.createElement("meta");
+      viewportTag.name = "viewport";
+      document.head.appendChild(viewportTag);
+    }
+    viewportTag.content = "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover";
+
     const tg = window.Telegram?.WebApp;
     if (tg) {
       tg.ready();
