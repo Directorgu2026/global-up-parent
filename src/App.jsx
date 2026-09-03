@@ -3,7 +3,7 @@ import {
   Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
   FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
   Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone, PiggyBank, Info, Users, X,
-  Upload, Paperclip, Loader2, MessageCircle, Image as ImageIcon,
+  Upload, Paperclip, Loader2, MessageCircle, Image as ImageIcon, ChevronDown as ChevronDownIcon,
 } from "lucide-react";
 
 /* ------------------------------ Настройка ------------------------------ */
@@ -259,15 +259,30 @@ function trendArrow(log) {
   return "same";
 }
 
-function ProgressCard({ log, generalGrades = [], t }) {
+function ProgressCard({ log, generalGrades = [], materials = [], homework = [], coins = 0, t }) {
   const total = log.length;
   const present = log.filter((r) => r.present).length;
-  const pct = total ? Math.round((present / total) * 100) : 0;
+  const attendancePct = total ? Math.round((present / total) * 100) : null;
   let streak = 0;
   for (const r of log) { if (r.present) streak++; else break; }
 
+  const lessonGrades = log.filter((r) => r.grade).map((r) => r.grade);
+  const allGrades = [...lessonGrades, ...generalGrades.map((g) => g.value)];
+  const avgGrade = allGrades.length ? (allGrades.reduce((a, b) => a + b, 0) / allGrades.length) : null;
+  const gradePct = avgGrade != null ? Math.round((avgGrade / 5) * 100) : null;
+
+  // Сколько заданий из выданных хотя бы раз были сданы (не важно, проверены уже или нет).
+  const submittedMaterialIds = new Set(homework.map((h) => h.materialId).filter(Boolean));
+  const homeworkPct = materials.length ? Math.round((materials.filter((m) => submittedMaterialIds.has(m.id)).length / materials.length) * 100) : null;
+
+  // Простой средний показатель: посещаемость + сданные ДЗ + оценки, без сложных весов —
+  // берём среднее по тем показателям, по которым вообще есть данные (если задания ещё не
+  // выдавались, например, показатель ДЗ просто не участвует, а не считается за 0).
+  const parts = [attendancePct, homeworkPct, gradePct].filter((x) => x != null);
+  const pct = parts.length ? Math.round(parts.reduce((a, b) => a + b, 0) / parts.length) : 0;
+
   // Светофор: красный / жёлтый / зелёный — понятно с одного взгляда
-  const zone = total === 0 ? "none" : pct >= 90 ? "green" : pct >= 60 ? "yellow" : "red";
+  const zone = parts.length === 0 ? "none" : pct >= 90 ? "green" : pct >= 60 ? "yellow" : "red";
   const zoneColors = {
     green: { bg: "var(--soft-green-bg)", ring: GREEN_D, text: "var(--soft-green-fg)", label: t("progress_great") },
     yellow: { bg: "var(--soft-yellow-bg)", ring: GOLD, text: "var(--soft-yellow-fg)", label: t("progress_ok") },
@@ -276,9 +291,6 @@ function ProgressCard({ log, generalGrades = [], t }) {
   }[zone];
 
   const trend = trendArrow(log);
-  const lessonGrades = log.filter((r) => r.grade).map((r) => r.grade);
-  const allGrades = [...lessonGrades, ...generalGrades.map((g) => g.value)];
-  const avgGrade = allGrades.length ? (allGrades.reduce((a, b) => a + b, 0) / allGrades.length).toFixed(1) : null;
 
   return (
     <Card className="p-4" style={{ background: zoneColors.bg, border: "none" }}>
@@ -306,12 +318,22 @@ function ProgressCard({ log, generalGrades = [], t }) {
                 <div className="text-[10px] opacity-45 mt-1">{t("streak_days")}</div>
               </div>
             )}
-            {avgGrade && (
+            {avgGrade != null && (
               <div>
-                <div className="text-[17px] font-extrabold leading-none">{avgGrade}</div>
+                <div className="text-[17px] font-extrabold leading-none">{avgGrade.toFixed(1)}</div>
                 <div className="text-[10px] opacity-45 mt-1">{t("avg_grade")}</div>
               </div>
             )}
+            {homeworkPct != null && (
+              <div>
+                <div className="text-[17px] font-extrabold leading-none">{homeworkPct}%</div>
+                <div className="text-[10px] opacity-45 mt-1">{t("progress_homework")}</div>
+              </div>
+            )}
+            <div>
+              <div className="text-[17px] font-extrabold leading-none flex items-center gap-1">{coins} <CoinsIcon size={14} style={{ color: GOLD }} /></div>
+              <div className="text-[10px] opacity-45 mt-1">{t("progress_coins")}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -508,6 +530,7 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
 function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
   const locale = LOCALE_OF[lang] || "ru-RU";
   const [showCoinsInfo, setShowCoinsInfo] = useState(false);
+  const [showOldHomework, setShowOldHomework] = useState(false);
   const log = [...(student.attendanceLog || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   const total = log.length;
   const present = log.filter((r) => r.present).length;
@@ -584,7 +607,7 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
         </div>
       )}
 
-      <ProgressCard log={log} generalGrades={student.generalGrades || []} t={t} />
+      <ProgressCard log={log} generalGrades={student.generalGrades || []} materials={student.materials || []} homework={student.homework || []} coins={student.coins} t={t} />
 
       {hasDebt && (
         <Card className="p-4" style={{ border: `1.5px solid ${RED_L}` }}>
@@ -664,14 +687,31 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
           <EmptyState text={t("no_homework")} icon={FileText} />
         ) : (
           <div className="space-y-2">
-            {materials.map((m) => (
-              <div key={m.id} className="p-3 rounded-2xl" style={{ background: "var(--soft-yellow-bg-2)", border: "1px solid var(--soft-yellow-border)" }}>
-                <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#B45309" }}>{new Date(m.date).toLocaleDateString(locale, { day: "2-digit", month: "long" })}</div>
-                {m.text && <div className="text-[13px] mt-1 leading-snug">{m.text}</div>}
-                {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-medium flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} className="inline mr-1 -mt-0.5" />{t("open_material")}</a>}
-                <HomeworkSubmitBox material={m} student={student} onSubmitHomework={onSubmitHomework} t={t} locale={locale} />
-              </div>
-            ))}
+            {(() => {
+              const [latest, ...older] = materials;
+              const renderItem = (m) => (
+                <div key={m.id} className="p-3 rounded-2xl" style={{ background: "var(--soft-yellow-bg-2)", border: "1px solid var(--soft-yellow-border)" }}>
+                  <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#B45309" }}>{new Date(m.date).toLocaleDateString(locale, { day: "2-digit", month: "long" })}</div>
+                  {m.text && <div className="text-[13px] mt-1 leading-snug">{m.text}</div>}
+                  {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-medium flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} className="inline mr-1 -mt-0.5" />{t("open_material")}</a>}
+                  <HomeworkSubmitBox material={m} student={student} onSubmitHomework={onSubmitHomework} t={t} locale={locale} />
+                </div>
+              );
+              return (
+                <>
+                  {renderItem(latest)}
+                  {older.length > 0 && (
+                    <>
+                      <button onClick={() => setShowOldHomework((v) => !v)} className="w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 opacity-60">
+                        {showOldHomework ? t("homework_hide_old") : t("homework_show_old", { n: older.length })}
+                        <ChevronDownIcon size={14} style={{ transform: showOldHomework ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+                      </button>
+                      {showOldHomework && older.map(renderItem)}
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
       </Card>
@@ -1021,6 +1061,8 @@ const TRANSLATIONS = {
     progress_bad: "Много пропусков — постарайся не пропускать",
     trend_up: "Растёт", trend_down: "Снижается", trend_same: "Стабильно",
     lessons_attended: "занятий посещено", streak_days: "подряд без пропусков", avg_grade: "средний балл",
+    progress_homework: "ДЗ сдано", progress_coins: "монет",
+    homework_show_old: "Показать старые ({n})", homework_hide_old: "Скрыть старые",
     no_group: "Пока не закреплена группа", teacher_label: "Преподаватель",
     attendance_grades: "Посещаемость и оценки", no_attendance: "Пока нет отметок посещаемости",
     homework: "Домашнее задание", no_homework: "Пока нет домашних заданий", open_material: "Открыть материал",
@@ -1086,6 +1128,8 @@ const TRANSLATIONS = {
     progress_bad: "Too many absences — try not to miss classes",
     trend_up: "Improving", trend_down: "Declining", trend_same: "Stable",
     lessons_attended: "lessons attended", streak_days: "in a row, no misses", avg_grade: "average grade",
+    progress_homework: "homework done", progress_coins: "coins",
+    homework_show_old: "Show older ({n})", homework_hide_old: "Hide older",
     no_group: "No group assigned yet", teacher_label: "Teacher",
     attendance_grades: "Attendance & grades", no_attendance: "No attendance records yet",
     homework: "Homework", no_homework: "No homework yet", open_material: "Open material",
@@ -1151,6 +1195,8 @@ const TRANSLATIONS = {
     progress_bad: "Ko'p qoldirilgan darslar — darslarni qoldirmaslikka harakat qiling",
     trend_up: "O'smoqda", trend_down: "Pasaymoqda", trend_same: "Barqaror",
     lessons_attended: "dars qatnashildi", streak_days: "ketma-ket, qoldirmasdan", avg_grade: "o'rtacha baho",
+    progress_homework: "vazifa topshirildi", progress_coins: "tanga",
+    homework_show_old: "Eskilarini ko'rsatish ({n})", homework_hide_old: "Eskilarini yashirish",
     no_group: "Hali guruh biriktirilmagan", teacher_label: "O'qituvchi",
     attendance_grades: "Davomat va baholar", no_attendance: "Hozircha davomat belgilari yo'q",
     homework: "Uyga vazifa", no_homework: "Hozircha uyga vazifa yo'q", open_material: "Materialni ochish",
