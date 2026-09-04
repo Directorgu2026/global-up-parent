@@ -267,7 +267,8 @@ function ProgressCard({ log, generalGrades = [], materials = [], homework = [], 
   for (const r of log) { if (r.present) streak++; else break; }
 
   const lessonGrades = log.filter((r) => r.grade).map((r) => r.grade);
-  const allGrades = [...lessonGrades, ...generalGrades.map((g) => g.value)];
+  const homeworkGrades = homework.filter((h) => h.grade).map((h) => h.grade);
+  const allGrades = [...lessonGrades, ...generalGrades.map((g) => g.value), ...homeworkGrades];
   const avgGrade = allGrades.length ? (allGrades.reduce((a, b) => a + b, 0) / allGrades.length) : null;
   const gradePct = avgGrade != null ? Math.round((avgGrade / 5) * 100) : null;
 
@@ -428,6 +429,7 @@ function ConfettiOverlay({ amount, onDone, t }) {
 // Сдача ДЗ прямо под заданием: если уже отправлено — показываем статус и файлы;
 // если ещё нет — маленькая форма (файлы + комментарий), разворачивается по кнопке.
 function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
+  const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
   const [expanded, setExpanded] = useState(false);
   const [files, setFiles] = useState([]);
   const [note, setNote] = useState("");
@@ -467,6 +469,9 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
           <div className="flex items-center gap-1.5 text-[11.5px] font-semibold" style={{ color: h.status === "reviewed" ? GREEN_D : "#B45309" }}>
             {h.status === "reviewed" ? <CheckCircle2 size={13} /> : <Clock size={13} />}
             {h.status === "reviewed" ? t("homework_reviewed") : t("homework_pending")}
+            {h.grade && (
+              <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md text-white" style={{ background: gradeColors[h.grade] || GREEN_D }}>{h.grade}</span>
+            )}
             <span className="opacity-50 font-normal ml-auto">{new Date(h.submittedAt).toLocaleDateString(locale, { day: "2-digit", month: "short" })}</span>
           </div>
           {h.note && <div className="text-[12.5px] mt-1 opacity-80">{h.note}</div>}
