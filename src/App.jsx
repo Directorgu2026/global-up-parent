@@ -3,7 +3,7 @@ import {
   Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
   FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
   Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone, PiggyBank, Info, Users, X,
-  Upload, Paperclip, Loader2, MessageCircle, Image as ImageIcon, ChevronDown as ChevronDownIcon,
+  Upload, Paperclip, Loader2, MessageCircle, Image as ImageIcon, ChevronDown as ChevronDownIcon, Camera,
 } from "lucide-react";
 
 /* ------------------------------ Настройка ------------------------------ */
@@ -124,6 +124,18 @@ const ruDate = (iso, locale = "ru-RU") => new Date(iso).toLocaleDateString(local
 const scheduleText = (g, fallback = "не задано") => (g?.days && g.days.length ? `${g.days.join("/")} · ${g.start}–${g.end}` : fallback);
 const initials = (name) => (name || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 
+// Лёгкая вибрация при нажатии — Telegram Mini Apps умеют это нативно, ощущается гораздо
+// отзывчивее обычной кнопки. За пределами Telegram (или если функция недоступна) — тихо ничего
+// не делает, никаких ошибок.
+function haptic(style = "light") {
+  try {
+    const h = window.Telegram?.WebApp?.HapticFeedback;
+    if (!h) return;
+    if (style === "success" || style === "error" || style === "warning") h.notificationOccurred(style);
+    else h.impactOccurred(style);
+  } catch {}
+}
+
 async function fetchMyData(initData, phone, password, redeemItemId, redeemStudentId) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
@@ -166,6 +178,49 @@ async function submitHomeworkRequest(initData, phone, password, submitHomework) 
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function updateAvatarRequest(initData, phone, password, updateAvatar) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  let curLang = "ru";
+  try { curLang = localStorage.getItem("gu_lang") || "ru"; } catch {}
+  try {
+    const res = await fetch(EDGE_FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+      body: JSON.stringify({ initData, phone, password, updateAvatar }),
+      signal: controller.signal,
+    });
+    return await res.json();
+  } catch (e) {
+    if (e.name === "AbortError") return { error: translate(curLang, "server_timeout") };
+    return { error: translate(curLang, "server_unreachable", { msg: String(e?.message || e) }) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Сжимаем и обрезаем фото в квадрат под аватарку — небольшой размер (400×400) достаточен для
+// круглой картинки в приложении, при этом файл получается совсем лёгким.
+function imageFileToAvatarPayload(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => { img.src = reader.result; };
+    reader.onerror = reject;
+    img.onload = () => {
+      const size = 400;
+      const minSide = Math.min(img.width, img.height);
+      const sx = (img.width - minSide) / 2, sy = (img.height - minSide) / 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = size; canvas.height = size;
+      canvas.getContext("2d").drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+      resolve(canvas.toDataURL("image/jpeg", 0.85).split(",")[1]);
+    };
+    img.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 // Сжимаем фото перед отправкой — чтобы не грузить огромные снимки с телефона "как есть"
@@ -216,11 +271,21 @@ function EmptyState({ text, icon: Icon = FileText }) {
     </div>
   );
 }
-function Avatar({ name, size = 40 }) {
+function Avatar({ name, size = 40, avatarUrl }) {
   const colors = [[RED, RED_D], [BLUE, "#1E40AF"], [PURPLE, "var(--soft-purple-fg)"], [GOLD, "#B45309"], [GREEN, GREEN_D], [BRICK, "#9A3412"]];
   let hash = 0;
   for (let i = 0; i < (name || "").length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
   const [c1, c2] = colors[hash % colors.length];
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name}
+        className="rounded-full shrink-0 object-cover"
+        style={{ width: size, height: size, boxShadow: `0 0 0 2px var(--surface), 0 1px 4px rgba(0,0,0,0.15)` }}
+      />
+    );
+  }
   return (
     <div className="rounded-full flex items-center justify-center shrink-0 font-bold text-white" style={{ width: size, height: size, background: `linear-gradient(135deg, ${c1}, ${c2})`, fontSize: size * 0.38, boxShadow: `0 0 0 2px var(--surface), 0 1px 4px rgba(0,0,0,0.15)` }}>
       {initials(name)}
@@ -546,6 +611,9 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
   const hasDebt = (student.debt || 0) > 0;
   const urgentNotifications = notifications.filter((n) => n.urgent);
   const normalNotifications = notifications.filter((n) => !n.urgent);
+  const TODAY_DAY_NAMES = { 0: "Вс", 1: "Пн", 2: "Вт", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб" };
+  const todayDayName = TODAY_DAY_NAMES[new Date().getDay()];
+  const todaysGroups = (student.groups || []).filter((g) => (g.days || []).includes(todayDayName));
 
   return (
     <div className="space-y-3">
@@ -574,6 +642,24 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {todaysGroups.length > 0 && (
+        <div className="rounded-3xl p-4 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${BLUE}, #1E40AF)` }}>
+          <div className="absolute -right-5 -bottom-5 w-20 h-20 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />
+          <p className="text-[10.5px] font-bold uppercase tracking-wide opacity-85 flex items-center gap-1.5"><Calendar size={13} />{t("today_lesson_label")}</p>
+          <div className="mt-2 space-y-2">
+            {todaysGroups.map((g) => (
+              <div key={g.id} className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[14px] font-bold truncate">{g.name}</div>
+                  <div className="text-[11.5px] opacity-80 flex items-center gap-1 mt-0.5"><MapPin size={11} />{g.room}</div>
+                </div>
+                <div className="text-[15px] font-extrabold shrink-0">{g.start}</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -753,7 +839,7 @@ function RatingTab({ student, t }) {
                     <span className="text-[13px] font-semibold opacity-40">{i + 1}</span>
                   )}
                 </div>
-                <Avatar name={m.name} size={36} />
+                <Avatar name={m.name} size={36} avatarUrl={m.avatarUrl} />
                 <div className="flex-1 min-w-0">
                   <div className="text-[13.5px] font-semibold truncate" style={{ color: isMe ? RED_D : INK }}>{m.name}{isMe && t("you_suffix")}</div>
                   {m.avgGrade !== null && m.avgGrade !== undefined && (
@@ -890,12 +976,33 @@ function FaqSection({ t }) {
   );
 }
 
-function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme }) {
+function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme, onUpdateAvatar }) {
   const locale = LOCALE_OF[lang] || "ru-RU";
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const avatarInputRef = useRef(null);
+  const handleAvatarPicked = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    await onUpdateAvatar(file);
+    setUploadingAvatar(false);
+    if (avatarInputRef.current) avatarInputRef.current.value = "";
+  };
   return (
     <div className="space-y-3">
       <Card className="p-6 text-center">
-        <Avatar name={student.name} size={72} />
+        <div className="relative inline-block">
+          <Avatar name={student.name} size={72} avatarUrl={student.avatarUrl} />
+          <button
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={uploadingAvatar}
+            className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+            style={{ background: RED, boxShadow: "0 2px 6px rgba(0,0,0,0.25)", border: "2px solid var(--surface)" }}
+          >
+            {uploadingAvatar ? <Loader2 size={13} className="text-white animate-spin" /> : <Camera size={13} className="text-white" />}
+          </button>
+          <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarPicked} />
+        </div>
         <h2 className="text-[17px] font-bold mt-3">{student.name}</h2>
         {student.phone && <p className="text-[13px] opacity-50 mt-0.5">{student.phone}</p>}
         <div className="flex items-center justify-center gap-2 mt-3">
@@ -1074,7 +1181,7 @@ const TRANSLATIONS = {
     homework_submit: "Сдать работу", homework_submit_again: "Отправить ещё раз",
     homework_pending: "Отправлено — ожидает проверки", homework_reviewed: "Проверено",
     homework_pick_photo: "Фото", homework_pick_file: "Файл", homework_note_placeholder: "Комментарий (необязательно)",
-    homework_send: "Отправить", cancel: "Отмена", homework_sent: "Домашнее задание отправлено",
+    homework_send: "Отправить", cancel: "Отмена", homework_sent: "Домашнее задание отправлено", avatar_updated: "Фото обновлено",
     important_notice: "Важное уведомление",
     your_balance: "Ваш баланс", shop_empty: "Магазин пока пуст", buy: "Купить", buy_confirm: "Точно купить?",
     missing_gc: "Ещё {sum} GC", shop_hint: "После покупки заявка сразу видна администратору и директору — просто дождитесь, когда вам выдадут награду.",
@@ -1095,7 +1202,7 @@ const TRANSLATIONS = {
     recent_payments: "Последние оплаты", teacher_fallback: "преподавателю",
     identity_error: "Не удалось подтвердить личность — откройте приложение заново и попробуйте снова.",
     order_sent: "Заявка отправлена! Дождитесь выдачи у администратора.",
-    coins_awarded: "Начислены GlobalCoins!", no_schedule: "не задано",
+    coins_awarded: "Начислены GlobalCoins!", no_schedule: "не задано", today_lesson_label: "Сегодня у вас занятие",
     server_timeout: "Сервер не ответил вовремя — проверьте интернет-соединение и попробуйте ещё раз.",
     server_unreachable: "Нет связи с сервером: {msg}",
     faq_title: "Вопросы и ответы",
@@ -1141,7 +1248,7 @@ const TRANSLATIONS = {
     homework_submit: "Submit work", homework_submit_again: "Submit again",
     homework_pending: "Submitted — awaiting review", homework_reviewed: "Reviewed",
     homework_pick_photo: "Photo", homework_pick_file: "File", homework_note_placeholder: "Comment (optional)",
-    homework_send: "Send", cancel: "Cancel", homework_sent: "Homework submitted",
+    homework_send: "Send", cancel: "Cancel", homework_sent: "Homework submitted", avatar_updated: "Photo updated",
     important_notice: "Important notice",
     your_balance: "Your balance", shop_empty: "Shop is empty for now", buy: "Buy", buy_confirm: "Confirm purchase?",
     missing_gc: "{sum} GC more needed", shop_hint: "After purchase, the admin and director see your request right away — just wait for them to hand over the reward.",
@@ -1162,7 +1269,7 @@ const TRANSLATIONS = {
     recent_payments: "Recent payments", teacher_fallback: "the teacher",
     identity_error: "Could not verify your identity — please reopen the app and try again.",
     order_sent: "Request sent! Wait for the admin to hand over the reward.",
-    coins_awarded: "GlobalCoins awarded!", no_schedule: "not set",
+    coins_awarded: "GlobalCoins awarded!", no_schedule: "not set", today_lesson_label: "You have class today",
     server_timeout: "The server did not respond in time — check your connection and try again.",
     server_unreachable: "No connection to server: {msg}",
     faq_title: "Questions & answers",
@@ -1208,7 +1315,7 @@ const TRANSLATIONS = {
     homework_submit: "Ishni topshirish", homework_submit_again: "Yana yuborish",
     homework_pending: "Yuborildi — tekshiruv kutilmoqda", homework_reviewed: "Tekshirildi",
     homework_pick_photo: "Foto", homework_pick_file: "Fayl", homework_note_placeholder: "Izoh (ixtiyoriy)",
-    homework_send: "Yuborish", cancel: "Bekor qilish", homework_sent: "Uyga vazifa yuborildi",
+    homework_send: "Yuborish", cancel: "Bekor qilish", homework_sent: "Uyga vazifa yuborildi", avatar_updated: "Rasm yangilandi",
     important_notice: "Muhim xabar",
     your_balance: "Balansingiz", shop_empty: "Do'kon hozircha bo'sh", buy: "Sotib olish", buy_confirm: "Rostdan sotib olasizmi?",
     missing_gc: "Yana {sum} GC kerak", shop_hint: "Xarid qilingandan so'ng ariza darhol administrator va direktorga ko'rinadi — sovg'a topshirilishini kuting.",
@@ -1229,7 +1336,7 @@ const TRANSLATIONS = {
     recent_payments: "So'nggi to'lovlar", teacher_fallback: "o'qituvchiga",
     identity_error: "Shaxsni tasdiqlab bo'lmadi — ilovani qayta oching va yana urinib ko'ring.",
     order_sent: "Ariza yuborildi! Administrator sovg'ani topshirishini kuting.",
-    coins_awarded: "GlobalCoins berildi!", no_schedule: "belgilanmagan",
+    coins_awarded: "GlobalCoins berildi!", no_schedule: "belgilanmagan", today_lesson_label: "Bugun darsingiz bor",
     server_timeout: "Server javob bermadi — internetni tekshirib, qayta urinib ko'ring.",
     server_unreachable: "Server bilan aloqa yo'q: {msg}",
     faq_title: "Savol-javoblar",
@@ -1343,11 +1450,18 @@ export default function ParentApp() {
   };
 
   const [refreshing, setRefreshing] = useState(false);
+  const pendingMutationsRef = useRef(0); // считает, идёт ли сейчас отправка ДЗ или покупка в магазине
+  const lastMutationAppliedRef = useRef(0); // увеличивается каждый раз, когда такое действие реально применило новые данные
   const silentRefresh = async () => {
     if (phase !== "ready") return;
     setRefreshing(true);
+    // Запоминаем "версию" действий ДО отправки запроса — если пока он летит, успеет применится
+    // отправка ДЗ или покупка, этот снимок может быть сделан раньше них и уже устарел.
+    const mutationVersionAtStart = lastMutationAppliedRef.current;
     try {
       const data = await fetchMyData(initData, phone.trim() || null, password.trim() || null);
+      if (pendingMutationsRef.current > 0) return; // есть незавершённое действие — не затираем его своим (возможно устаревшим) снимком
+      if (lastMutationAppliedRef.current !== mutationVersionAtStart) return; // за время ожидания уже применилось действие — пропускаем устаревший снимок
       if (!data.error && data.linked) {
         applyStudents(data.students);
         setShopItems(data.shopItems || []);
@@ -1439,32 +1553,39 @@ export default function ParentApp() {
   const handleRedeem = async (itemId) => {
     if (!student) return;
     setRedeeming(true);
+    pendingMutationsRef.current++;
     try {
       const data = await fetchMyData(initData, phone.trim() || null, password.trim() || null, itemId, student.id);
-      if (data.error) { setToast(data.error); setTimeout(() => setToast(""), 3000); return; }
-      if (!data.linked) { setToast(t("identity_error")); setTimeout(() => setToast(""), 4000); return; }
+      if (data.error) { haptic("error"); setToast(data.error); setTimeout(() => setToast(""), 3000); return; }
+      if (!data.linked) { haptic("error"); setToast(t("identity_error")); setTimeout(() => setToast(""), 4000); return; }
       if (data.redeemed) {
         applyStudents(data.students);
+        lastMutationAppliedRef.current++;
+        haptic("success");
         setToast(t("order_sent"));
         setTimeout(() => setToast(""), 3500);
       }
     } finally {
+      pendingMutationsRef.current--;
       setRedeeming(false);
     }
   };
 
   const handleSubmitHomework = async ({ groupId, materialId, note, fileList }) => {
     if (!student) return { ok: false };
+    pendingMutationsRef.current++;
     try {
       const files = [];
       for (const f of fileList || []) files.push(await fileToUploadPayload(f));
       const data = await submitHomeworkRequest(initData, phone.trim() || null, password.trim() || null, {
         studentId: student.id, groupId, materialId, note, files,
       });
-      if (data.error) { setToast(data.error); setTimeout(() => setToast(""), 3500); return { ok: false }; }
-      if (!data.linked) { setToast(t("identity_error")); setTimeout(() => setToast(""), 4000); return { ok: false }; }
+      if (data.error) { haptic("error"); setToast(data.error); setTimeout(() => setToast(""), 3500); return { ok: false }; }
+      if (!data.linked) { haptic("error"); setToast(t("identity_error")); setTimeout(() => setToast(""), 4000); return { ok: false }; }
       if (data.submitted) {
         applyStudents(data.students);
+        lastMutationAppliedRef.current++;
+        haptic("success");
         setToast(t("homework_sent"));
         setTimeout(() => setToast(""), 3000);
         return { ok: true };
@@ -1474,6 +1595,36 @@ export default function ParentApp() {
       setToast(t("server_unreachable", { msg: String(e?.message || e) }));
       setTimeout(() => setToast(""), 3500);
       return { ok: false };
+    } finally {
+      pendingMutationsRef.current--;
+    }
+  };
+
+  const handleUpdateAvatar = async (file) => {
+    if (!student) return { ok: false };
+    pendingMutationsRef.current++;
+    try {
+      const dataBase64 = await imageFileToAvatarPayload(file);
+      const data = await updateAvatarRequest(initData, phone.trim() || null, password.trim() || null, {
+        studentId: student.id, dataBase64,
+      });
+      if (data.error) { haptic("error"); setToast(data.error); setTimeout(() => setToast(""), 3500); return { ok: false }; }
+      if (!data.linked) { haptic("error"); setToast(t("identity_error")); setTimeout(() => setToast(""), 4000); return { ok: false }; }
+      if (data.avatarUpdated) {
+        applyStudents(data.students);
+        lastMutationAppliedRef.current++;
+        haptic("success");
+        setToast(t("avatar_updated"));
+        setTimeout(() => setToast(""), 3000);
+        return { ok: true };
+      }
+      return { ok: false };
+    } catch (e) {
+      setToast(t("server_unreachable", { msg: String(e?.message || e) }));
+      setTimeout(() => setToast(""), 3500);
+      return { ok: false };
+    } finally {
+      pendingMutationsRef.current--;
     }
   };
 
@@ -1527,7 +1678,7 @@ export default function ParentApp() {
 
       <div className="px-4 pt-5 pb-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <Avatar name={student?.name || "?"} size={38} />
+          <Avatar name={student?.name || "?"} size={38} avatarUrl={student?.avatarUrl} />
           <div>
             <div className="text-[15px] font-bold leading-none">{student?.name}</div>
             <div className="text-[11.5px] opacity-45 mt-1">{student?.group?.name || "Global Up"}</div>
@@ -1578,7 +1729,7 @@ export default function ParentApp() {
           {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} />}
           {tab === "rating" && <RatingTab student={student} t={t} />}
           {tab === "shop" && <ShopTab student={student} shopItems={shopItems} onRedeem={handleRedeem} redeeming={redeeming} t={t} lang={lang} />}
-          {tab === "profile" && <ProfileTab student={student} onLogout={handleLogout} t={t} lang={lang} changeLang={changeLang} theme={theme} changeTheme={changeTheme} />}
+          {tab === "profile" && <ProfileTab student={student} onLogout={handleLogout} t={t} lang={lang} changeLang={changeLang} theme={theme} changeTheme={changeTheme} onUpdateAvatar={handleUpdateAvatar} />}
         </div>
       )}
 
@@ -1588,7 +1739,7 @@ export default function ParentApp() {
           {tabsFor(t).map((tabItem) => {
             const active = tab === tabItem.key;
             return (
-              <button key={tabItem.key} onClick={() => setTab(tabItem.key)} className="flex-1 flex flex-col items-center gap-1 py-3 rounded-2xl transition-all duration-150 active:scale-95" style={{ background: active ? RED_L : "transparent" }}>
+              <button key={tabItem.key} onClick={() => { haptic("light"); setTab(tabItem.key); }} className="flex-1 flex flex-col items-center gap-1 py-3 rounded-2xl transition-all duration-150 active:scale-95" style={{ background: active ? RED_L : "transparent" }}>
                 <tabItem.icon size={18} style={{ color: active ? RED_D : "#9C9A90", opacity: active ? 1 : 0.7 }} />
                 <span className="text-[10px] font-semibold" style={{ color: active ? RED_D : "#9C9A90" }}>{tabItem.label}</span>
               </button>
