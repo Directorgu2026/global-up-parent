@@ -124,6 +124,16 @@ const ruDate = (iso, locale = "ru-RU") => new Date(iso).toLocaleDateString(local
 const scheduleText = (g, fallback = "не задано") => (g?.days && g.days.length ? `${g.days.join("/")} · ${g.start}–${g.end}` : fallback);
 const initials = (name) => (name || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 
+// Цвет по названию курса/предмета — свой у каждого предмета (тот же принцип хэша, что и у
+// цветных инициалов), чтобы карточки разных групп визуально различались, а не сливались в
+// одинаковый повторяющийся красный блок, если предметов несколько.
+function courseColor(course) {
+  const palette = [[RED, RED_D], [BLUE, "#1E40AF"], [PURPLE, "#5B21B6"], [GOLD, "#A16207"], [GREEN, GREEN_D], [BRICK, "#9A3412"]];
+  let hash = 0;
+  for (let i = 0; i < (course || "").length; i++) hash = (hash * 31 + course.charCodeAt(i)) >>> 0;
+  return palette[hash % palette.length];
+}
+
 // Лёгкая вибрация при нажатии — Telegram Mini Apps умеют это нативно, ощущается гораздо
 // отзывчивее обычной кнопки. За пределами Telegram (или если функция недоступна) — тихо ничего
 // не делает, никаких ошибок.
@@ -263,11 +273,13 @@ function fileToUploadPayload(file) {
 function Card({ children, className = "", style = {} }) {
   return <div className={`rounded-3xl ${className}`} style={{ background: "var(--surface)", boxShadow: "0 1px 3px rgba(26,26,23,0.06), 0 1px 2px rgba(26,26,23,0.04)", ...style }}>{children}</div>;
 }
-function EmptyState({ text, icon: Icon = FileText }) {
+function EmptyState({ text, icon: Icon = FileText, emoji }) {
   return (
-    <div className="py-8 text-center">
-      <Icon size={26} className="mx-auto mb-2 opacity-25" />
-      <p className="text-[12.5px] opacity-45">{text}</p>
+    <div className="py-9 text-center">
+      <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: "var(--soft-yellow-bg-2, var(--surface-soft))" }}>
+        {emoji ? <span className="text-[24px]">{emoji}</span> : <Icon size={22} style={{ opacity: 0.35 }} />}
+      </div>
+      <p className="text-[12.5px] opacity-50 px-6">{text}</p>
     </div>
   );
 }
@@ -461,7 +473,7 @@ function DebtPopup({ amount, adminTelegram, lang, onClose, t }) {
     </div>
   );
 }
-function ConfettiOverlay({ amount, onDone, t }) {
+function ConfettiOverlay({ amount, grade, onDone, t }) {
   useEffect(() => { const timer = setTimeout(onDone, 2800); return () => clearTimeout(timer); }, []);
   const pieces = useMemo(() => Array.from({ length: 70 }, (_, i) => ({
     id: i,
@@ -472,6 +484,7 @@ function ConfettiOverlay({ amount, onDone, t }) {
     rotate: Math.random() * 360,
     size: 6 + Math.random() * 8,
   })), []);
+  const isGrade = grade !== undefined && grade !== null;
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden" style={{ background: "rgba(0,0,0,0.15)" }} onClick={onDone}>
       {pieces.map((p) => (
@@ -482,9 +495,19 @@ function ConfettiOverlay({ amount, onDone, t }) {
         }} />
       ))}
       <div className="anim-pop rounded-3xl px-9 py-8 text-center shadow-2xl mx-6" style={{ background: "var(--surface)" }}>
-        <div className="text-[52px] leading-none">🪙</div>
-        <div className="text-[30px] font-extrabold mt-2" style={{ color: "#B45309" }}>+{amount} GC</div>
-        <div className="text-[13px] opacity-50 mt-1.5">{t ? t("coins_awarded") : "Начислены GlobalCoins!"}</div>
+        {isGrade ? (
+          <>
+            <div className="text-[52px] leading-none">⭐</div>
+            <div className="text-[30px] font-extrabold mt-2" style={{ color: GREEN_D }}>{grade}</div>
+            <div className="text-[13px] opacity-50 mt-1.5">{t ? t("new_grade_popup") : "Новая оценка!"}</div>
+          </>
+        ) : (
+          <>
+            <div className="text-[52px] leading-none">🪙</div>
+            <div className="text-[30px] font-extrabold mt-2" style={{ color: "#B45309" }}>+{amount} GC</div>
+            <div className="text-[13px] opacity-50 mt-1.5">{t ? t("coins_awarded") : "Начислены GlobalCoins!"}</div>
+          </>
+        )}
       </div>
       <style>{`@keyframes confettiFall { to { transform: translateY(115vh) rotate(720deg); opacity: 0.4; } }`}</style>
     </div>
@@ -721,25 +744,32 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
         </Card>
       )}
 
-      {/* Расписание — плашка градиентом */}
+      {/* Расписание — своя карточка на группу, цвет зависит от предмета */}
       {(student.groups || []).length === 0 ? (
-        <div className="rounded-3xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
-          <p className="text-[13.5px] opacity-90">{t("no_group")}</p>
-        </div>
+        <Card className="p-5">
+          <p className="text-[13.5px] opacity-60">{t("no_group")}</p>
+        </Card>
       ) : (
-        student.groups.map((g) => (
-          <div key={g.id} className="rounded-3xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
-            <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
-            <div className="absolute -right-2 bottom-2 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
-            <p className="text-[11px] font-medium opacity-80 uppercase tracking-wide">{g.course}</p>
-            <h2 className="text-[19px] font-bold mt-0.5">{g.name}</h2>
-            <div className="flex items-center gap-3 mt-3 text-[12.5px]">
-              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}><Calendar size={12} className="inline mr-1 -mt-0.5" />{scheduleText(g, t("no_schedule"))}</span>
-              <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }}><MapPin size={12} className="inline mr-1 -mt-0.5" />{g.room}</span>
-            </div>
-            {g.teacherName && <p className="text-[12px] mt-2 opacity-90">{t("teacher_label")}: {g.teacherName}</p>}
-          </div>
-        ))
+        student.groups.map((g) => {
+          const [c1, c2] = courseColor(g.course);
+          return (
+            <Card key={g.id} className="p-0 overflow-hidden">
+              <div className="h-1.5" style={{ background: `linear-gradient(90deg, ${c1}, ${c2})` }} />
+              <div className="p-4">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c1 }} />
+                  <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: c1 }}>{g.course}</p>
+                </div>
+                <h2 className="text-[16.5px] font-bold mt-0.5">{g.name}</h2>
+                <div className="flex items-center gap-2 mt-2.5 flex-wrap text-[12px]">
+                  <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "var(--surface-soft)" }}><Calendar size={11} className="inline mr-0.5 -mt-0.5" />{scheduleText(g, t("no_schedule"))}</span>
+                  <span className="flex items-center gap-1 px-2.5 py-1 rounded-full" style={{ background: "var(--surface-soft)" }}><MapPin size={11} className="inline mr-0.5 -mt-0.5" />{g.room}</span>
+                </div>
+                {g.teacherName && <p className="text-[12px] mt-2 opacity-55">{t("teacher_label")}: {g.teacherName}</p>}
+              </div>
+            </Card>
+          );
+        })
       )}
 
       {/* Посещаемость и оценки */}
@@ -753,9 +783,27 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
           )}
         </div>
         {recent.length === 0 ? (
-          <EmptyState text={t("no_attendance")} icon={FileText} />
+          <EmptyState text={t("no_attendance")} emoji="📅" />
         ) : (
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          <>
+            {log.length >= 4 && (
+              <div className="flex items-end gap-[3px] mb-3 h-8">
+                {[...log].reverse().slice(0, 30).map((r, i) => (
+                  <div
+                    key={i}
+                    title={ruDate(r.date, locale)}
+                    className="flex-1 rounded-sm"
+                    style={{
+                      height: r.present ? "100%" : r.excused ? "55%" : "30%",
+                      background: r.present ? GREEN_D : r.excused ? BLUE : BRICK,
+                      opacity: 0.85,
+                      minWidth: 2,
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2 overflow-x-auto pb-1">
             {recent.map((r, i) => (
               <div key={i} className="shrink-0 w-16 rounded-2xl p-2 text-center" style={{ background: r.present ? "var(--soft-green-bg)" : r.excused ? "var(--soft-blue-bg)" : "var(--soft-orange-bg)" }}>
                 <div className="text-[10px] font-medium opacity-50 mono">{ruDate(r.date, locale)}</div>
@@ -767,7 +815,8 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
                 )}
               </div>
             ))}
-          </div>
+            </div>
+          </>
         )}
       </Card>
 
@@ -775,7 +824,7 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
       <Card className="p-4">
         <h3 className="text-[14.5px] font-bold mb-3 flex items-center gap-1.5"><FileText size={16} />{t("homework")}</h3>
         {materials.length === 0 ? (
-          <EmptyState text={t("no_homework")} icon={FileText} />
+          <EmptyState text={t("no_homework")} emoji="🎉" />
         ) : (
           <div className="space-y-2">
             {(() => {
@@ -812,9 +861,77 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
 }
 
 /* ------------------------------- Рейтинг ------------------------------- */
+const WEEK_DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+function ScheduleTab({ student, t, lang }) {
+  const TODAY_DAY_NAMES = { 0: "Вс", 1: "Пн", 2: "Вт", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб" };
+  const todayDayName = TODAY_DAY_NAMES[new Date().getDay()];
+  const dayLabels = { "Пн": t("mon"), "Вт": t("tue"), "Ср": t("wed"), "Чт": t("thu"), "Пт": t("fri"), "Сб": t("sat"), "Вс": t("sun") };
+  const groups = student.groups || [];
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-[15px] font-bold px-1">{t("tab_schedule")}</h2>
+      {groups.length === 0 ? (
+        <EmptyState text={t("no_group")} icon={Calendar} />
+      ) : (
+        WEEK_DAYS.map((day) => {
+          const dayGroups = groups.filter((g) => (g.days || []).includes(day));
+          const isToday = day === todayDayName;
+          return (
+            <div key={day}>
+              <div className="flex items-center gap-2 px-1 mb-1.5">
+                <span className="text-[12.5px] font-bold" style={{ color: isToday ? RED_D : "var(--ink)" }}>{dayLabels[day]}</span>
+                {isToday && <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full text-white" style={{ background: RED }}>{t("today_badge")}</span>}
+              </div>
+              {dayGroups.length === 0 ? (
+                <div className="px-3 py-2.5 rounded-xl text-[12px] opacity-40" style={{ background: "var(--surface-soft)" }}>{t("no_lessons_day")}</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {dayGroups.sort((a, b) => (a.start || "").localeCompare(b.start || "")).map((g) => {
+                    const [c1] = courseColor(g.course);
+                    return (
+                      <div key={g.id} className="flex items-center gap-3 p-3 rounded-2xl" style={{ background: isToday ? "var(--soft-yellow-bg-2)" : "var(--surface)", border: `1px solid ${isToday ? "var(--soft-yellow-border)" : "var(--line)"}` }}>
+                        <div className="text-center shrink-0 w-12">
+                          <div className="text-[13px] font-extrabold" style={{ color: c1 }}>{g.start}</div>
+                          <div className="text-[9.5px] opacity-45">{g.end}</div>
+                        </div>
+                        <div className="w-1 self-stretch rounded-full shrink-0" style={{ background: c1 }} />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[13.5px] font-semibold truncate">{g.name}</div>
+                          <div className="text-[11px] opacity-50 flex items-center gap-1 mt-0.5"><MapPin size={10} />{g.room}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
 function RatingTab({ student, t }) {
   const groupmates = student.groupmates || [];
   const myGroups = student.groups || [];
+  const myRankIndex = groupmates.findIndex((m) => m.id === student.id);
+  // Запоминаем место в рейтинге с прошлого раза, когда открывали приложение — сравниваем один
+  // раз при первом открытии экрана (не при каждом фоновом обновлении, иначе стрелка никогда бы
+  // не показывалась, гонка сама с собой). Ключ — свой на каждого привязанного ученика.
+  const [rankChange] = useState(() => {
+    if (myRankIndex < 0) return null;
+    try {
+      const key = `gu_last_rank_${student.id}`;
+      const prevRaw = localStorage.getItem(key);
+      localStorage.setItem(key, String(myRankIndex));
+      if (prevRaw === null) return null;
+      const prevRank = Number(prevRaw);
+      if (prevRank === myRankIndex) return "same";
+      return prevRank > myRankIndex ? "up" : "down"; // индекс меньше = место выше = поднялся
+    } catch { return null; }
+  });
   if (myGroups.length === 0) return <EmptyState text={t("rating_no_group")} icon={Trophy} />;
   const podiumBg = ["linear-gradient(135deg,#FCD34D,#F59E0B)", "linear-gradient(135deg,#D1D5DB,#9CA3AF)", "linear-gradient(135deg,#FCA5A5,#EA580C)"];
   return (
@@ -823,9 +940,15 @@ function RatingTab({ student, t }) {
         <Trophy size={26} className="mx-auto" />
         <h2 className="text-[16px] font-bold mt-1">{t("rating_title")}</h2>
         <p className="text-[12px] opacity-85 mt-0.5">{t("rating_subtitle", { name: myGroups.map((g) => g.name).join(", ") })}</p>
+        {rankChange && rankChange !== "same" && (
+          <div className="inline-flex items-center gap-1 mt-2 px-2.5 py-1 rounded-full text-[11px] font-bold" style={{ background: "rgba(255,255,255,0.2)" }}>
+            {rankChange === "up" ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+            {rankChange === "up" ? t("rank_up") : t("rank_down")}
+          </div>
+        )}
       </div>
       {groupmates.length === 0 ? (
-        <EmptyState text={t("rating_empty")} icon={GraduationCap} />
+        <EmptyState text={t("rating_empty")} emoji="👥" />
       ) : (
         <Card className="p-2">
           {groupmates.map((m, i) => {
@@ -878,8 +1001,25 @@ function ShopTab({ student, shopItems, onRedeem, redeeming, t, lang }) {
         </div>
       </div>
       {showCoinsInfo && <CoinsInfoPopup onClose={() => setShowCoinsInfo(false)} t={t} />}
+      {(() => {
+        const nextItem = [...shopItems].filter((i) => i.cost > student.coins).sort((a, b) => a.cost - b.cost)[0];
+        if (!nextItem) return null;
+        const pct = Math.min(100, Math.round((student.coins / nextItem.cost) * 100));
+        return (
+          <Card className="p-4">
+            <div className="flex items-center justify-between text-[12.5px]">
+              <span className="opacity-60">{t("next_reward_label")}</span>
+              <span className="font-bold">{nextItem.name}</span>
+            </div>
+            <div className="h-2.5 rounded-full mt-2 overflow-hidden" style={{ background: "var(--surface-soft)" }}>
+              <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${GOLD}, #B45309)` }} />
+            </div>
+            <div className="text-[11px] opacity-50 mt-1.5">{t("coins_left_to_go", { n: nextItem.cost - student.coins })}</div>
+          </Card>
+        );
+      })()}
       {shopItems.length === 0 ? (
-        <EmptyState text={t("shop_empty")} icon={ShoppingBag} />
+        <EmptyState text={t("shop_empty")} emoji="🛍️" />
       ) : (
         <div className="grid grid-cols-2 gap-3">
           {sorted.map((item, i) => {
@@ -976,6 +1116,24 @@ function FaqSection({ t }) {
   );
 }
 
+// Значки считаются прямо из уже имеющихся данных — никаких новых полей в базе не нужно.
+function computeAchievements(student) {
+  const log = [...(student.attendanceLog || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  let streak = 0;
+  for (const r of log) { if (r.present) streak++; else break; }
+  const homeworkDone = (student.homework || []).length;
+  const homeworkReviewed = (student.homework || []).filter((h) => h.status === "reviewed").length;
+  const goodGrades = log.filter((r) => r.grade >= 4).length + (student.generalGrades || []).filter((g) => g.value >= 4).length;
+
+  const list = [];
+  if (streak >= 3) list.push({ emoji: "🔥", labelKey: "ach_streak", n: streak });
+  if (homeworkDone >= 1) list.push({ emoji: "📚", labelKey: "ach_homework", n: homeworkDone });
+  if (homeworkReviewed >= 3) list.push({ emoji: "✅", labelKey: "ach_reviewed", n: homeworkReviewed });
+  if (goodGrades >= 3) list.push({ emoji: "⭐", labelKey: "ach_grades", n: goodGrades });
+  if ((student.coins || 0) >= 100) list.push({ emoji: "💰", labelKey: "ach_coins", n: student.coins });
+  return list;
+}
+
 function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme, onUpdateAvatar }) {
   const locale = LOCALE_OF[lang] || "ru-RU";
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -1009,7 +1167,37 @@ function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme
           <span className="text-[13px] font-bold px-3 py-1.5 rounded-full" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}><CoinsIcon size={13} className="inline mr-1 -mt-0.5" />{student.coins} GC</span>
           {student.discount > 0 && <span className="text-[13px] font-bold px-3 py-1.5 rounded-full" style={{ background: "var(--soft-green-bg)", color: GREEN_D }}>−{student.discount}%</span>}
         </div>
+        {(() => {
+          const log = student.attendanceLog || [];
+          const totalLessons = log.filter((r) => r.present).length;
+          if (totalLessons === 0) return null;
+          return (
+            <div className="flex items-center justify-center gap-6 mt-4 pt-4" style={{ borderTop: "1px solid var(--line)" }}>
+              <div className="text-center">
+                <div className="text-[18px] font-extrabold">{totalLessons}</div>
+                <div className="text-[10.5px] opacity-45 mt-0.5">{t("profile_lessons_total")}</div>
+              </div>
+            </div>
+          );
+        })()}
       </Card>
+      {(() => {
+        const achievements = computeAchievements(student);
+        if (achievements.length === 0) return null;
+        return (
+          <Card className="p-4">
+            <h3 className="text-[13.5px] font-bold mb-2.5">{t("achievements_title")}</h3>
+            <div className="flex flex-wrap gap-2">
+              {achievements.map((a) => (
+                <div key={a.labelKey} className="flex items-center gap-1.5 px-3 py-2 rounded-full" style={{ background: "var(--soft-yellow-bg-2, var(--surface-soft))" }}>
+                  <span className="text-[15px]">{a.emoji}</span>
+                  <span className="text-[11.5px] font-semibold">{t(a.labelKey, { n: a.n })}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        );
+      })()}
       <Card className="p-4">
         <h3 className="text-[13.5px] font-bold mb-2.5">{t("info_title")}</h3>
         <div className="space-y-2 text-[13px]">
@@ -1165,7 +1353,9 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
 /* ----------------------------------- Переводы ----------------------------------- */
 const TRANSLATIONS = {
   ru: {
-    tab_home: "Главная", tab_rating: "Рейтинг", tab_shop: "Магазин", tab_profile: "Профиль",
+    tab_home: "Главная", tab_schedule: "Расписание", tab_rating: "Рейтинг", tab_shop: "Магазин", tab_profile: "Профиль",
+    mon: "Понедельник", tue: "Вторник", wed: "Среда", thu: "Четверг", fri: "Пятница", sat: "Суббота", sun: "Воскресенье",
+    today_badge: "Сегодня", no_lessons_day: "Занятий нет",
     balance: "Баланс", debt: "Долг", debt_none: "Долгов нет", debt_credit_note: "В счёт след. месяца",
     coins: "GlobalCoins", credit_note: "На балансе {sum} сум — уменьшит следующее начисление",
     progress_title: "Мой прогресс", progress_none: "Пока нет данных",
@@ -1184,6 +1374,7 @@ const TRANSLATIONS = {
     homework_send: "Отправить", cancel: "Отмена", homework_sent: "Домашнее задание отправлено", avatar_updated: "Фото обновлено",
     important_notice: "Важное уведомление",
     your_balance: "Ваш баланс", shop_empty: "Магазин пока пуст", buy: "Купить", buy_confirm: "Точно купить?",
+    next_reward_label: "До следующей награды:", coins_left_to_go: "Осталось накопить: {n} GC",
     missing_gc: "Ещё {sum} GC", shop_hint: "После покупки заявка сразу видна администратору и директору — просто дождитесь, когда вам выдадут награду.",
     my_orders: "Мои заказы", order_done: "Выдано", order_pending: "В очереди",
     rank_you: "вы", place_label: "Ваше место", of_label: "из",
@@ -1195,14 +1386,17 @@ const TRANSLATIONS = {
     theme_light: "Светлая", theme_dark: "Тёмная",
     month_breakdown: "Разбивка по месяцам", discount_label: "Скидка −{pct}%",
     empty_student: "Ученик не найден", refresh: "Обновить",
-    rating_title: "Рейтинг группы", rating_subtitle: "{name} · по GlobalCoins",
+    rating_title: "Рейтинг группы", rating_subtitle: "{name} · по GlobalCoins", rank_up: "Поднялись с прошлого раза", rank_down: "Опустились с прошлого раза",
     rating_no_group: "Рейтинг появится, когда закрепят группу", rating_empty: "В группе пока никого нет",
     avg_grade_line: "Средний балл: {value}", you_suffix: " (вы)",
-    info_title: "Информация", group_label: "Группа", course_label: "Курс",
+    info_title: "Информация", group_label: "Группа", course_label: "Курс", profile_lessons_total: "занятий посещено",
+    achievements_title: "Достижения",
+    ach_streak: "{n} занятий подряд без пропусков", ach_homework: "Сдано ДЗ: {n}", ach_reviewed: "Проверено ДЗ: {n}",
+    ach_grades: "Хороших оценок: {n}", ach_coins: "Накоплено {n} GC",
     recent_payments: "Последние оплаты", teacher_fallback: "преподавателю",
     identity_error: "Не удалось подтвердить личность — откройте приложение заново и попробуйте снова.",
     order_sent: "Заявка отправлена! Дождитесь выдачи у администратора.",
-    coins_awarded: "Начислены GlobalCoins!", no_schedule: "не задано", today_lesson_label: "Сегодня у вас занятие",
+    coins_awarded: "Начислены GlobalCoins!", no_schedule: "не задано", today_lesson_label: "Сегодня у вас занятие", new_grade_popup: "Новая оценка!",
     server_timeout: "Сервер не ответил вовремя — проверьте интернет-соединение и попробуйте ещё раз.",
     server_unreachable: "Нет связи с сервером: {msg}",
     faq_title: "Вопросы и ответы",
@@ -1232,7 +1426,9 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Победы на олимпиадах, высокие баллы на тестах и другие достижения.",
   },
   en: {
-    tab_home: "Home", tab_rating: "Rating", tab_shop: "Shop", tab_profile: "Profile",
+    tab_home: "Home", tab_schedule: "Schedule", tab_rating: "Rating", tab_shop: "Shop", tab_profile: "Profile",
+    mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday",
+    today_badge: "Today", no_lessons_day: "No lessons",
     balance: "Balance", debt: "Debt", debt_none: "No debt", debt_credit_note: "Credit for next month",
     coins: "GlobalCoins", credit_note: "Balance: {sum} — will reduce your next charge",
     progress_title: "My progress", progress_none: "No data yet",
@@ -1251,6 +1447,7 @@ const TRANSLATIONS = {
     homework_send: "Send", cancel: "Cancel", homework_sent: "Homework submitted", avatar_updated: "Photo updated",
     important_notice: "Important notice",
     your_balance: "Your balance", shop_empty: "Shop is empty for now", buy: "Buy", buy_confirm: "Confirm purchase?",
+    next_reward_label: "Next reward:", coins_left_to_go: "{n} GC to go",
     missing_gc: "{sum} GC more needed", shop_hint: "After purchase, the admin and director see your request right away — just wait for them to hand over the reward.",
     my_orders: "My orders", order_done: "Delivered", order_pending: "Pending",
     rank_you: "you", place_label: "Your place", of_label: "of",
@@ -1262,14 +1459,17 @@ const TRANSLATIONS = {
     theme_light: "Light", theme_dark: "Dark",
     month_breakdown: "Breakdown by month", discount_label: "Discount −{pct}%",
     empty_student: "Student not found", refresh: "Refresh",
-    rating_title: "Group rating", rating_subtitle: "{name} · by GlobalCoins",
+    rating_title: "Group rating", rating_subtitle: "{name} · by GlobalCoins", rank_up: "Moved up since last time", rank_down: "Moved down since last time",
     rating_no_group: "Rating will appear once a group is assigned", rating_empty: "No one in the group yet",
     avg_grade_line: "Average grade: {value}", you_suffix: " (you)",
-    info_title: "Information", group_label: "Group", course_label: "Course",
+    info_title: "Information", group_label: "Group", course_label: "Course", profile_lessons_total: "lessons attended",
+    achievements_title: "Achievements",
+    ach_streak: "{n} lessons in a row, no misses", ach_homework: "Homework submitted: {n}", ach_reviewed: "Homework reviewed: {n}",
+    ach_grades: "Good grades: {n}", ach_coins: "{n} GC saved up",
     recent_payments: "Recent payments", teacher_fallback: "the teacher",
     identity_error: "Could not verify your identity — please reopen the app and try again.",
     order_sent: "Request sent! Wait for the admin to hand over the reward.",
-    coins_awarded: "GlobalCoins awarded!", no_schedule: "not set", today_lesson_label: "You have class today",
+    coins_awarded: "GlobalCoins awarded!", no_schedule: "not set", today_lesson_label: "You have class today", new_grade_popup: "New grade!",
     server_timeout: "The server did not respond in time — check your connection and try again.",
     server_unreachable: "No connection to server: {msg}",
     faq_title: "Questions & answers",
@@ -1299,7 +1499,9 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Wins at olympiads, high test scores, and other achievements.",
   },
   uz: {
-    tab_home: "Asosiy", tab_rating: "Reyting", tab_shop: "Do'kon", tab_profile: "Profil",
+    tab_home: "Asosiy", tab_schedule: "Dars jadvali", tab_rating: "Reyting", tab_shop: "Do'kon", tab_profile: "Profil",
+    mon: "Dushanba", tue: "Seshanba", wed: "Chorshanba", thu: "Payshanba", fri: "Juma", sat: "Shanba", sun: "Yakshanba",
+    today_badge: "Bugun", no_lessons_day: "Dars yo'q",
     balance: "Balans", debt: "Qarz", debt_none: "Qarz yo'q", debt_credit_note: "Keyingi oyga hisobga olinadi",
     coins: "GlobalCoins", credit_note: "Balansda {sum} so'm — keyingi to'lovni kamaytiradi",
     progress_title: "Mening natijam", progress_none: "Hozircha ma'lumot yo'q",
@@ -1318,6 +1520,7 @@ const TRANSLATIONS = {
     homework_send: "Yuborish", cancel: "Bekor qilish", homework_sent: "Uyga vazifa yuborildi", avatar_updated: "Rasm yangilandi",
     important_notice: "Muhim xabar",
     your_balance: "Balansingiz", shop_empty: "Do'kon hozircha bo'sh", buy: "Sotib olish", buy_confirm: "Rostdan sotib olasizmi?",
+    next_reward_label: "Keyingi sovg'agacha:", coins_left_to_go: "Yana kerak: {n} GC",
     missing_gc: "Yana {sum} GC kerak", shop_hint: "Xarid qilingandan so'ng ariza darhol administrator va direktorga ko'rinadi — sovg'a topshirilishini kuting.",
     my_orders: "Mening buyurtmalarim", order_done: "Topshirildi", order_pending: "Navbatda",
     rank_you: "siz", place_label: "Sizning o'rningiz", of_label: "dan",
@@ -1329,14 +1532,17 @@ const TRANSLATIONS = {
     theme_light: "Yorug'", theme_dark: "Tungi",
     month_breakdown: "Oylar bo'yicha taqsimot", discount_label: "Chegirma −{pct}%",
     empty_student: "O'quvchi topilmadi", refresh: "Yangilash",
-    rating_title: "Guruh reytingi", rating_subtitle: "{name} · GlobalCoins bo'yicha",
+    rating_title: "Guruh reytingi", rating_subtitle: "{name} · GlobalCoins bo'yicha", rank_up: "Oldingi safardan ko'tarildi", rank_down: "Oldingi safardan pasaydi",
     rating_no_group: "Guruh biriktirilgach reyting paydo bo'ladi", rating_empty: "Guruhda hali hech kim yo'q",
     avg_grade_line: "O'rtacha baho: {value}", you_suffix: " (siz)",
-    info_title: "Ma'lumot", group_label: "Guruh", course_label: "Kurs",
+    info_title: "Ma'lumot", group_label: "Guruh", course_label: "Kurs", profile_lessons_total: "dars qatnashildi",
+    achievements_title: "Yutuqlar",
+    ach_streak: "{n} darsda ketma-ket, qoldirmasdan", ach_homework: "Topshirilgan vazifa: {n}", ach_reviewed: "Tekshirilgan vazifa: {n}",
+    ach_grades: "Yaxshi baholar: {n}", ach_coins: "{n} GC to'plandi",
     recent_payments: "So'nggi to'lovlar", teacher_fallback: "o'qituvchiga",
     identity_error: "Shaxsni tasdiqlab bo'lmadi — ilovani qayta oching va yana urinib ko'ring.",
     order_sent: "Ariza yuborildi! Administrator sovg'ani topshirishini kuting.",
-    coins_awarded: "GlobalCoins berildi!", no_schedule: "belgilanmagan", today_lesson_label: "Bugun darsingiz bor",
+    coins_awarded: "GlobalCoins berildi!", no_schedule: "belgilanmagan", today_lesson_label: "Bugun darsingiz bor", new_grade_popup: "Yangi baho!",
     server_timeout: "Server javob bermadi — internetni tekshirib, qayta urinib ko'ring.",
     server_unreachable: "Server bilan aloqa yo'q: {msg}",
     faq_title: "Savol-javoblar",
@@ -1377,6 +1583,7 @@ const LOCALE_OF = { ru: "ru-RU", en: "en-US", uz: "uz-Latn" };
 function tabsFor(t) {
   return [
     { key: "home", label: t("tab_home"), icon: Home },
+    { key: "schedule", label: t("tab_schedule"), icon: Calendar },
     { key: "rating", label: t("tab_rating"), icon: Trophy },
     { key: "shop", label: t("tab_shop"), icon: ShoppingBag },
     { key: "profile", label: t("tab_profile"), icon: User },
@@ -1399,8 +1606,6 @@ export default function ParentApp() {
   const [toast, setToast] = useState("");
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [coinGain, setCoinGain] = useState(null); // { amount } — показывает конфетти, когда монеты выросли
-  const [showDebtPopup, setShowDebtPopup] = useState(false);
-  const debtPopupShownRef = useRef(false); // чтобы не выскакивало повторно при каждом обновлении данных в течение сеанса
   const lastCoinsRef = useRef({}); // studentId -> последний известный баланс монет
 
   // Язык и тема — выбор запоминается на этом устройстве
@@ -1412,14 +1617,25 @@ export default function ParentApp() {
 
   // Оборачивает setStudents: сравнивает баланс монет каждого ученика с прошлым разом
   // и, если он вырос (учитель/админ начислил), показывает конфетти с количеством монет.
+  // Так же отслеживаем появление новой хорошей оценки (4 или 5) — если поставили только что,
+  // а не просто пришли исторические данные при первой загрузке (lastGradeCountRef ещё не задан).
+  const lastGradeCountRef = useRef({});
   const applyStudents = (nextStudents) => {
     let gained = 0;
+    let newGrade = null;
     (nextStudents || []).forEach((s) => {
       const prev = lastCoinsRef.current[s.id];
       if (prev !== undefined && s.coins > prev) gained += s.coins - prev;
       lastCoinsRef.current[s.id] = s.coins;
+
+      const goodGrades = (s.attendanceLog || []).filter((r) => r.grade >= 4);
+      const latestGrade = [...goodGrades].sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+      const prevCount = lastGradeCountRef.current[s.id];
+      if (prevCount !== undefined && goodGrades.length > prevCount && latestGrade) newGrade = latestGrade.grade;
+      lastGradeCountRef.current[s.id] = goodGrades.length;
     });
     if (gained > 0) setCoinGain({ amount: gained });
+    else if (newGrade) setCoinGain({ grade: newGrade });
     setStudents(nextStudents || []);
   };
 
@@ -1470,6 +1686,39 @@ export default function ParentApp() {
       setRefreshing(false);
     }
   };
+
+  // "Потянуть вниз, чтобы обновить" — привычный мобильный жест. Работает только если страница
+  // уже прокручена ровно до самого верха (иначе это просто обычная прокрутка контента).
+  const [pullDistance, setPullDistance] = useState(0);
+  const pullStartYRef = useRef(null);
+  const PULL_THRESHOLD = 64;
+  useEffect(() => {
+    const onTouchStart = (e) => {
+      if (window.scrollY <= 0 && phase === "ready") pullStartYRef.current = e.touches[0].clientY;
+    };
+    const onTouchMove = (e) => {
+      if (pullStartYRef.current === null) return;
+      const diff = e.touches[0].clientY - pullStartYRef.current;
+      if (diff > 0 && window.scrollY <= 0) setPullDistance(Math.min(diff * 0.5, PULL_THRESHOLD * 1.4));
+      else { pullStartYRef.current = null; setPullDistance(0); }
+    };
+    const onTouchEnd = () => {
+      if (pullStartYRef.current !== null && pullDistance >= PULL_THRESHOLD) {
+        haptic("light");
+        silentRefresh();
+      }
+      pullStartYRef.current = null;
+      setPullDistance(0);
+    };
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [pullDistance, phase]);
 
   useEffect(() => {
     // Запрещаем зум страницы (иначе на iPhone/Android при определённых жестах или при фокусе
@@ -1536,19 +1785,13 @@ export default function ParentApp() {
   const handleLogout = () => {
     setStudents([]);
     lastCoinsRef.current = {};
+    lastGradeCountRef.current = {};
     setPhone(""); setPassword(""); setLoginError("");
     storageRemove("gu_phone"); storageRemove("gu_password");
     setPhase("not_linked");
   };
 
   const student = students.find((s) => s.id === activeId);
-
-  useEffect(() => {
-    if (student && student.debt > 0 && !debtPopupShownRef.current) {
-      debtPopupShownRef.current = true;
-      setShowDebtPopup(true);
-    }
-  }, [student?.id, student?.debt]);
 
   const handleRedeem = async (itemId) => {
     if (!student) return;
@@ -1630,13 +1873,25 @@ export default function ParentApp() {
 
   if (phase === "loading") {
     return (
-      <div className={`theme-${theme} min-h-screen flex items-center justify-center`} style={{ background: PAPER }}>
+      <div className={`theme-${theme} min-h-screen pb-10`} style={{ background: PAPER }}>
         <style>{FONT_IMPORT}</style>
         <style>{THEME_VARS}</style>
-        <div className="text-center">
-          <div className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-white text-[16px] font-extrabold" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})`, animation: "pulseLogo 1.1s ease-in-out infinite" }}>GU</div>
-          <p className="text-[12.5px] opacity-45 mt-3" style={{ color: INK }}>{t("loading")}</p>
-          <style>{`@keyframes pulseLogo { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.92); opacity: 0.75; } }`}</style>
+        <style>{`@keyframes skeletonPulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }`}</style>
+        <div className="px-4 pt-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full" style={{ background: "var(--surface-alt)", animation: "skeletonPulse 1.3s ease-in-out infinite" }} />
+            <div className="flex-1">
+              <div className="h-3.5 w-32 rounded-full" style={{ background: "var(--surface-alt)", animation: "skeletonPulse 1.3s ease-in-out infinite" }} />
+              <div className="h-2.5 w-20 rounded-full mt-1.5" style={{ background: "var(--surface-alt)", animation: "skeletonPulse 1.3s ease-in-out infinite" }} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-5">
+            <div className="h-24 rounded-3xl" style={{ background: "var(--surface-alt)", animation: "skeletonPulse 1.3s ease-in-out infinite" }} />
+            <div className="h-24 rounded-3xl" style={{ background: "var(--surface-alt)", animation: "skeletonPulse 1.3s ease-in-out infinite" }} />
+          </div>
+          <div className="h-28 rounded-3xl mt-3" style={{ background: "var(--surface-alt)", animation: "skeletonPulse 1.3s ease-in-out infinite" }} />
+          <div className="h-40 rounded-3xl mt-3" style={{ background: "var(--surface-alt)", animation: "skeletonPulse 1.3s ease-in-out infinite" }} />
+          <div className="h-32 rounded-3xl mt-3" style={{ background: "var(--surface-alt)", animation: "skeletonPulse 1.3s ease-in-out infinite" }} />
         </div>
       </div>
     );
@@ -1665,9 +1920,14 @@ export default function ParentApp() {
       <style>{FONT_IMPORT}</style>
       <style>{THEME_VARS}</style>
 
-      {coinGain && <ConfettiOverlay amount={coinGain.amount} onDone={() => setCoinGain(null)} t={t} />}
-      {showDebtPopup && student && (
-        <DebtPopup amount={student.debt} adminTelegram={student.adminTelegram} lang={lang} onClose={() => setShowDebtPopup(false)} t={t} />
+      {coinGain && <ConfettiOverlay amount={coinGain.amount} grade={coinGain.grade} onDone={() => setCoinGain(null)} t={t} />}
+
+      {pullDistance > 0 && (
+        <div className="fixed top-0 left-0 right-0 flex justify-center z-40 pointer-events-none" style={{ paddingTop: 10, opacity: Math.min(1, pullDistance / 40) }}>
+          <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--surface)", boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
+            <RefreshCw size={15} style={{ color: RED, transform: `rotate(${pullDistance * 4}deg)`, opacity: pullDistance >= PULL_THRESHOLD ? 1 : 0.5 }} />
+          </div>
+        </div>
       )}
 
       {toast && (
@@ -1727,6 +1987,7 @@ export default function ParentApp() {
       ) : (
         <div className="px-4">
           {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} />}
+          {tab === "schedule" && <ScheduleTab student={student} t={t} lang={lang} />}
           {tab === "rating" && <RatingTab student={student} t={t} />}
           {tab === "shop" && <ShopTab student={student} shopItems={shopItems} onRedeem={handleRedeem} redeeming={redeeming} t={t} lang={lang} />}
           {tab === "profile" && <ProfileTab student={student} onLogout={handleLogout} t={t} lang={lang} changeLang={changeLang} theme={theme} changeTheme={changeTheme} onUpdateAvatar={handleUpdateAvatar} />}
