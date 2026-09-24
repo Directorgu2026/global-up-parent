@@ -211,6 +211,27 @@ async function updateAvatarRequest(initData, phone, password, updateAvatar) {
   }
 }
 
+async function requestServiceRequest(initData, phone, password, requestService) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  let curLang = "ru";
+  try { curLang = localStorage.getItem("gu_lang") || "ru"; } catch {}
+  try {
+    const res = await fetch(EDGE_FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+      body: JSON.stringify({ initData, phone, password, requestService }),
+      signal: controller.signal,
+    });
+    return await res.json();
+  } catch (e) {
+    if (e.name === "AbortError") return { error: translate(curLang, "server_timeout") };
+    return { error: translate(curLang, "server_unreachable", { msg: String(e?.message || e) }) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // Сжимаем и обрезаем фото в квадрат под аватарку — небольшой размер (400×400) достаточен для
 // круглой картинки в приложении, при этом файл получается совсем лёгким.
 function imageFileToAvatarPayload(file) {
@@ -419,6 +440,71 @@ function ProgressCard({ log, generalGrades = [], materials = [], homework = [], 
   );
 }
 
+// Иконка/подпись/нужно ли поле "тема" — зависит от типа заявки
+const SERVICE_TYPES = {
+  support_lesson: { emoji: "🆘", needsTopic: false },
+  topic_reexplain: { emoji: "🔁", needsTopic: true },
+  materials_only: { emoji: "📎", needsTopic: true },
+};
+function ServiceRequestModal({ type, student, onClose, onSubmit, t }) {
+  const groups = student.groups || [];
+  const [groupId, setGroupId] = useState(groups.length === 1 ? groups[0].id : "");
+  const [topic, setTopic] = useState("");
+  const [sending, setSending] = useState(false);
+  const meta = SERVICE_TYPES[type];
+  const canSend = groupId && (!meta.needsTopic || topic.trim().length > 0) && !sending;
+  const handleSend = async () => {
+    if (!canSend) return;
+    setSending(true);
+    const ok = await onSubmit(groupId, topic);
+    setSending(false);
+    if (ok) onClose();
+  };
+  return (
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-5" style={{ background: "rgba(0,0,0,0.45)" }} onClick={onClose}>
+      <div className="anim-pop w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6" style={{ background: "var(--surface)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-[16px] font-bold flex items-center gap-2"><span className="text-[20px]">{meta.emoji}</span>{t(`service_${type}_title`)}</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }}><X size={15} /></button>
+        </div>
+        <p className="text-[12.5px] opacity-55 mb-4">{t(`service_${type}_desc`)}</p>
+
+        {groups.length > 1 && (
+          <div className="mb-3">
+            <label className="text-[12px] opacity-55 block mb-1.5">{t("service_group_label")}</label>
+            <select value={groupId} onChange={(e) => setGroupId(e.target.value)} className="w-full text-[13.5px] px-3.5 py-2.5 rounded-xl outline-none" style={{ background: "var(--surface-soft)", border: `1px solid var(--line)` }}>
+              <option value="">{t("service_group_placeholder")}</option>
+              {groups.map((g) => <option key={g.id} value={g.id}>{g.name} · {g.course}</option>)}
+            </select>
+          </div>
+        )}
+
+        {meta.needsTopic && (
+          <div className="mb-4">
+            <label className="text-[12px] opacity-55 block mb-1.5">{t("service_topic_label")}</label>
+            <textarea
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder={t("service_topic_placeholder")}
+              rows={3}
+              className="w-full text-[13.5px] px-3.5 py-2.5 rounded-xl outline-none resize-none"
+              style={{ background: "var(--surface-soft)", border: `1px solid var(--line)` }}
+            />
+          </div>
+        )}
+
+        <button
+          onClick={handleSend}
+          disabled={!canSend}
+          className="w-full py-3 rounded-full text-[14px] font-bold text-white transition-opacity"
+          style={{ background: RED, opacity: canSend ? 1 : 0.4 }}
+        >
+          {sending ? <Loader2 size={16} className="inline animate-spin" /> : t("service_send_btn")}
+        </button>
+      </div>
+    </div>
+  );
+}
 function CoinsInfoPopup({ onClose, t }) {
   const items = [
     { icon: Users, bg: "var(--soft-yellow-bg)", fg: "var(--soft-yellow-fg)", title: t("coins_info_referral_title"), text: t("coins_info_referral_text"), highlight: true },
@@ -620,10 +706,11 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
   );
 }
 
-function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
+function HomeTab({ student, notifications = [], t, lang, onSubmitHomework, onRequestService }) {
   const locale = LOCALE_OF[lang] || "ru-RU";
   const [showCoinsInfo, setShowCoinsInfo] = useState(false);
   const [showOldHomework, setShowOldHomework] = useState(false);
+  const [serviceModalType, setServiceModalType] = useState(null);
   const log = [...(student.attendanceLog || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   const total = log.length;
   const present = log.filter((r) => r.present).length;
@@ -742,6 +829,37 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework }) {
             </div>
           )}
         </Card>
+      )}
+
+      {/* Сервис — заявки учителю: суппорт-урок, повторное объяснение темы, только материалы */}
+      <Card className="p-4">
+        <h3 className="text-[13.5px] font-bold mb-3">{t("service_section_title")}</h3>
+        <div className="space-y-2">
+          <button onClick={() => { haptic("light"); setServiceModalType("support_lesson"); }} className="w-full flex items-center gap-3 p-3 rounded-2xl text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface-soft)" }}>
+            <span className="text-[20px]">🆘</span>
+            <span className="text-[13px] font-semibold flex-1">{t("service_support_lesson_title")}</span>
+            <ChevronDownIcon size={15} className="opacity-30" style={{ transform: "rotate(-90deg)" }} />
+          </button>
+          <button onClick={() => { haptic("light"); setServiceModalType("topic_reexplain"); }} className="w-full flex items-center gap-3 p-3 rounded-2xl text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface-soft)" }}>
+            <span className="text-[20px]">🔁</span>
+            <span className="text-[13px] font-semibold flex-1">{t("service_topic_reexplain_title")}</span>
+            <ChevronDownIcon size={15} className="opacity-30" style={{ transform: "rotate(-90deg)" }} />
+          </button>
+          <button onClick={() => { haptic("light"); setServiceModalType("materials_only"); }} className="w-full flex items-center gap-3 p-3 rounded-2xl text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface-soft)" }}>
+            <span className="text-[20px]">📎</span>
+            <span className="text-[13px] font-semibold flex-1">{t("service_materials_only_title")}</span>
+            <ChevronDownIcon size={15} className="opacity-30" style={{ transform: "rotate(-90deg)" }} />
+          </button>
+        </div>
+      </Card>
+      {serviceModalType && (
+        <ServiceRequestModal
+          type={serviceModalType}
+          student={student}
+          onClose={() => setServiceModalType(null)}
+          onSubmit={(groupId, topic) => onRequestService(serviceModalType, groupId, topic)}
+          t={t}
+        />
       )}
 
       {/* Расписание — своя карточка на группу, цвет зависит от предмета */}
@@ -1385,6 +1503,16 @@ const TRANSLATIONS = {
     loading: "Загрузка…", settings: "Настройки", language: "Язык", theme: "Тема",
     theme_light: "Светлая", theme_dark: "Тёмная",
     month_breakdown: "Разбивка по месяцам", discount_label: "Скидка −{pct}%",
+    service_section_title: "Сервис",
+    service_support_lesson_title: "Записаться на суппорт-урок",
+    service_topic_reexplain_title: "Повторное объяснение темы",
+    service_materials_only_title: "Нужны только материалы",
+    service_support_lesson_desc: "Учитель получит заявку и свяжется с вами, чтобы назначить время.",
+    service_topic_reexplain_desc: "Укажите, какую тему нужно объяснить ещё раз — заявка уйдёт учителю.",
+    service_materials_only_desc: "Если полноценный урок не нужен, а нужны только презентация/материалы по теме.",
+    service_group_label: "Предмет", service_group_placeholder: "Выберите предмет",
+    service_topic_label: "Какая тема?", service_topic_placeholder: "Например: прошедшее время, тема 5",
+    service_send_btn: "Отправить заявку", service_request_sent: "Заявка отправлена учителю",
     empty_student: "Ученик не найден", refresh: "Обновить",
     rating_title: "Рейтинг группы", rating_subtitle: "{name} · по GlobalCoins", rank_up: "Поднялись с прошлого раза", rank_down: "Опустились с прошлого раза",
     rating_no_group: "Рейтинг появится, когда закрепят группу", rating_empty: "В группе пока никого нет",
@@ -1458,6 +1586,16 @@ const TRANSLATIONS = {
     loading: "Loading…", settings: "Settings", language: "Language", theme: "Theme",
     theme_light: "Light", theme_dark: "Dark",
     month_breakdown: "Breakdown by month", discount_label: "Discount −{pct}%",
+    service_section_title: "Service",
+    service_support_lesson_title: "Book a support lesson",
+    service_topic_reexplain_title: "Re-explain a topic",
+    service_materials_only_title: "Just need materials",
+    service_support_lesson_desc: "Your teacher will get the request and reach out to arrange a time.",
+    service_topic_reexplain_desc: "Tell us which topic needs re-explaining — the request goes to your teacher.",
+    service_materials_only_desc: "If you don't need a full lesson, just the presentation/materials on a topic.",
+    service_group_label: "Subject", service_group_placeholder: "Choose a subject",
+    service_topic_label: "Which topic?", service_topic_placeholder: "E.g.: past tense, topic 5",
+    service_send_btn: "Send request", service_request_sent: "Request sent to your teacher",
     empty_student: "Student not found", refresh: "Refresh",
     rating_title: "Group rating", rating_subtitle: "{name} · by GlobalCoins", rank_up: "Moved up since last time", rank_down: "Moved down since last time",
     rating_no_group: "Rating will appear once a group is assigned", rating_empty: "No one in the group yet",
@@ -1531,6 +1669,16 @@ const TRANSLATIONS = {
     loading: "Yuklanmoqda…", settings: "Sozlamalar", language: "Til", theme: "Mavzu",
     theme_light: "Yorug'", theme_dark: "Tungi",
     month_breakdown: "Oylar bo'yicha taqsimot", discount_label: "Chegirma −{pct}%",
+    service_section_title: "Xizmat",
+    service_support_lesson_title: "Qo'shimcha darsga yozilish",
+    service_topic_reexplain_title: "Mavzuni qayta tushuntirish",
+    service_materials_only_title: "Faqat materiallar kerak",
+    service_support_lesson_desc: "O'qituvchingiz so'rovni oladi va vaqt belgilash uchun bog'lanadi.",
+    service_topic_reexplain_desc: "Qaysi mavzuni qayta tushuntirish kerakligini yozing — so'rov o'qituvchiga boradi.",
+    service_materials_only_desc: "To'liq dars kerak bo'lmasa, faqat taqdimot/materiallar kerak bo'lsa.",
+    service_group_label: "Fan", service_group_placeholder: "Fanni tanlang",
+    service_topic_label: "Qaysi mavzu?", service_topic_placeholder: "Masalan: o'tgan zamon, 5-mavzu",
+    service_send_btn: "So'rovni yuborish", service_request_sent: "So'rov o'qituvchiga yuborildi",
     empty_student: "O'quvchi topilmadi", refresh: "Yangilash",
     rating_title: "Guruh reytingi", rating_subtitle: "{name} · GlobalCoins bo'yicha", rank_up: "Oldingi safardan ko'tarildi", rank_down: "Oldingi safardan pasaydi",
     rating_no_group: "Guruh biriktirilgach reyting paydo bo'ladi", rating_empty: "Guruhda hali hech kim yo'q",
@@ -1871,6 +2019,32 @@ export default function ParentApp() {
     }
   };
 
+  const handleRequestService = async (type, groupId, topic) => {
+    if (!student) return false;
+    pendingMutationsRef.current++;
+    try {
+      const data = await requestServiceRequest(initData, phone.trim() || null, password.trim() || null, {
+        studentId: student.id, groupId, type, topic,
+      });
+      if (data.error) { haptic("error"); setToast(data.error); setTimeout(() => setToast(""), 3500); return false; }
+      if (!data.linked) { haptic("error"); setToast(t("identity_error")); setTimeout(() => setToast(""), 4000); return false; }
+      if (data.requestSent) {
+        applyStudents(data.students);
+        haptic("success");
+        setToast(t("service_request_sent"));
+        setTimeout(() => setToast(""), 3500);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      setToast(t("server_unreachable", { msg: String(e?.message || e) }));
+      setTimeout(() => setToast(""), 3500);
+      return false;
+    } finally {
+      pendingMutationsRef.current--;
+    }
+  };
+
   if (phase === "loading") {
     return (
       <div className={`theme-${theme} min-h-screen pb-10`} style={{ background: PAPER }}>
@@ -1986,7 +2160,7 @@ export default function ParentApp() {
         <div className="px-4"><EmptyState text={t("empty_student")} /></div>
       ) : (
         <div className="px-4">
-          {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} />}
+          {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onRequestService={handleRequestService} />}
           {tab === "schedule" && <ScheduleTab student={student} t={t} lang={lang} />}
           {tab === "rating" && <RatingTab student={student} t={t} />}
           {tab === "shop" && <ShopTab student={student} shopItems={shopItems} onRedeem={handleRedeem} redeeming={redeeming} t={t} lang={lang} />}
