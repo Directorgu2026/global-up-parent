@@ -1367,6 +1367,10 @@ function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme
           </Card>
         );
       })()}
+      <div>
+        <h3 className="text-[13.5px] font-bold mb-2.5 px-1">{t("tab_finance")}</h3>
+        <FinanceTab student={student} t={t} lang={lang} />
+      </div>
       <Card className="p-4">
         <h3 className="text-[13.5px] font-bold mb-2.5">{t("info_title")}</h3>
         <div className="space-y-2 text-[13px]">
@@ -1380,7 +1384,6 @@ function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme
               </div>
             ))
           )}
-          <div className="flex items-center justify-between py-1.5"><span className="opacity-50">{t("debt")}</span><span className="font-semibold" style={{ color: student.debt > 0 ? RED_D : GREEN_D }}>{fmt(student.debt)} {lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}</span></div>
         </div>
       </Card>
 
@@ -1772,7 +1775,6 @@ function tabsFor(t) {
   return [
     { key: "home", label: t("tab_home"), icon: Home },
     { key: "schedule", label: t("tab_schedule"), icon: Calendar },
-    { key: "finance", label: t("tab_finance"), icon: Wallet },
     { key: "rating", label: t("tab_rating"), icon: Trophy },
     { key: "shop", label: t("tab_shop"), icon: ShoppingBag },
     { key: "profile", label: t("tab_profile"), icon: User },
@@ -2203,7 +2205,6 @@ export default function ParentApp() {
         <div className="px-4">
           {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onRequestService={handleRequestService} />}
           {tab === "schedule" && <ScheduleTab student={student} t={t} lang={lang} />}
-          {tab === "finance" && <FinanceTab student={student} t={t} lang={lang} />}
           {tab === "rating" && <RatingTab student={student} t={t} />}
           {tab === "shop" && <ShopTab student={student} shopItems={shopItems} onRedeem={handleRedeem} redeeming={redeeming} t={t} lang={lang} />}
           {tab === "profile" && <ProfileTab student={student} onLogout={handleLogout} t={t} lang={lang} changeLang={changeLang} theme={theme} changeTheme={changeTheme} onUpdateAvatar={handleUpdateAvatar} />}
@@ -2216,9 +2217,9 @@ export default function ParentApp() {
           {tabsFor(t).map((tabItem) => {
             const active = tab === tabItem.key;
             return (
-              <button key={tabItem.key} onClick={() => { haptic("light"); setTab(tabItem.key); }} className="flex-1 flex flex-col items-center gap-0.5 py-2.5 rounded-2xl transition-all duration-150 active:scale-95" style={{ background: active ? RED_L : "transparent" }}>
-                <tabItem.icon size={16} style={{ color: active ? RED_D : "#9C9A90", opacity: active ? 1 : 0.7 }} />
-                <span className="text-[9px] font-semibold leading-none text-center" style={{ color: active ? RED_D : "#9C9A90" }}>{tabItem.label}</span>
+              <button key={tabItem.key} onClick={() => { haptic("light"); setTab(tabItem.key); }} className="flex-1 flex flex-col items-center gap-1 py-3 rounded-2xl transition-all duration-150 active:scale-95" style={{ background: active ? RED_L : "transparent" }}>
+                <tabItem.icon size={18} style={{ color: active ? RED_D : "#9C9A90", opacity: active ? 1 : 0.7 }} />
+                <span className="text-[10px] font-semibold" style={{ color: active ? RED_D : "#9C9A90" }}>{tabItem.label}</span>
               </button>
             );
           })}
