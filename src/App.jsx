@@ -3,7 +3,7 @@ import {
   Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
   FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
   Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone, PiggyBank, Info, Users, X,
-  Upload, Paperclip, Loader2, MessageCircle, Image as ImageIcon, ChevronDown as ChevronDownIcon, Camera,
+  Upload, Paperclip, Loader2, MessageCircle, Image as ImageIcon, ChevronDown as ChevronDownIcon, Camera, LifeBuoy,
 } from "lucide-react";
 
 /* ------------------------------ Настройка ------------------------------ */
@@ -442,9 +442,9 @@ function ProgressCard({ log, generalGrades = [], materials = [], homework = [], 
 
 // Иконка/подпись/нужно ли поле "тема" — зависит от типа заявки
 const SERVICE_TYPES = {
-  support_lesson: { emoji: "🆘", needsTopic: false },
-  topic_reexplain: { emoji: "🔁", needsTopic: true },
-  materials_only: { emoji: "📎", needsTopic: true },
+  support_lesson: { icon: LifeBuoy, color: RED_D, needsTopic: false },
+  topic_reexplain: { icon: RefreshCw, color: "#1D4ED8", needsTopic: true },
+  materials_only: { icon: Paperclip, color: GREEN_D, needsTopic: true },
 };
 function ServiceRequestModal({ type, student, onClose, onSubmit, t }) {
   const groups = student.groups || [];
@@ -464,7 +464,7 @@ function ServiceRequestModal({ type, student, onClose, onSubmit, t }) {
     <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-5" style={{ background: "rgba(0,0,0,0.45)" }} onClick={onClose}>
       <div className="anim-pop w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6" style={{ background: "var(--surface)" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-[16px] font-bold flex items-center gap-2"><span className="text-[20px]">{meta.emoji}</span>{t(`service_${type}_title`)}</h2>
+          <h2 className="text-[16px] font-bold flex items-center gap-2"><meta.icon size={20} style={{ color: meta.color }} />{t(`service_${type}_title`)}</h2>
           <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }}><X size={15} /></button>
         </div>
         <p className="text-[12.5px] opacity-55 mb-4">{t(`service_${type}_desc`)}</p>
@@ -810,45 +810,21 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework, onReq
 
       <ProgressCard log={log} generalGrades={student.generalGrades || []} materials={student.materials || []} homework={student.homework || []} coins={student.coins} t={t} />
 
-      {hasDebt && (
-        <Card className="p-4" style={{ border: `1.5px solid ${RED_L}` }}>
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="text-[13.5px] font-bold flex items-center gap-1.5"><Wallet size={15} style={{ color: RED_D }} /> {t("month_breakdown")}</h3>
-          </div>
-          {student.discount > 0 && (
-            <div className="text-[11.5px] font-semibold mt-1 mb-2 px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}><PartyPopper size={12} /> {t("discount_label", { pct: student.discount })}</div>
-          )}
-          {(student.monthlyDebts || []).length > 0 && (
-            <div className="mt-2 space-y-1.5">
-              {[...student.monthlyDebts].sort((a, b) => a.month.localeCompare(b.month)).map((md) => (
-                <div key={md.month} className="flex items-center justify-between text-[12.5px] px-3 py-2 rounded-xl" style={{ background: PAPER }}>
-                  <span className="capitalize">{new Date(md.month + "-01").toLocaleDateString(locale, { month: "long", year: "numeric" })}</span>
-                  <span className="font-semibold">{fmt(md.amount)} {lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
-
       {/* Сервис — заявки учителю: суппорт-урок, повторное объяснение темы, только материалы */}
       <Card className="p-4">
         <h3 className="text-[13.5px] font-bold mb-3">{t("service_section_title")}</h3>
-        <div className="space-y-2">
-          <button onClick={() => { haptic("light"); setServiceModalType("support_lesson"); }} className="w-full flex items-center gap-3 p-3 rounded-2xl text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface-soft)" }}>
-            <span className="text-[20px]">🆘</span>
-            <span className="text-[13px] font-semibold flex-1">{t("service_support_lesson_title")}</span>
-            <ChevronDownIcon size={15} className="opacity-30" style={{ transform: "rotate(-90deg)" }} />
+        <div className="grid grid-cols-3 gap-2.5">
+          <button onClick={() => { haptic("light"); setServiceModalType("support_lesson"); }} className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl text-center active:scale-95 transition-transform aspect-square" style={{ background: "var(--soft-red-bg, #FEE2E2)" }}>
+            <LifeBuoy size={22} style={{ color: RED_D }} />
+            <span className="text-[11px] font-semibold leading-tight" style={{ color: RED_D }}>{t("service_support_lesson_title")}</span>
           </button>
-          <button onClick={() => { haptic("light"); setServiceModalType("topic_reexplain"); }} className="w-full flex items-center gap-3 p-3 rounded-2xl text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface-soft)" }}>
-            <span className="text-[20px]">🔁</span>
-            <span className="text-[13px] font-semibold flex-1">{t("service_topic_reexplain_title")}</span>
-            <ChevronDownIcon size={15} className="opacity-30" style={{ transform: "rotate(-90deg)" }} />
+          <button onClick={() => { haptic("light"); setServiceModalType("topic_reexplain"); }} className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl text-center active:scale-95 transition-transform aspect-square" style={{ background: "var(--soft-blue-bg, #DBEAFE)" }}>
+            <RefreshCw size={22} style={{ color: "#1D4ED8" }} />
+            <span className="text-[11px] font-semibold leading-tight" style={{ color: "#1D4ED8" }}>{t("service_topic_reexplain_title")}</span>
           </button>
-          <button onClick={() => { haptic("light"); setServiceModalType("materials_only"); }} className="w-full flex items-center gap-3 p-3 rounded-2xl text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface-soft)" }}>
-            <span className="text-[20px]">📎</span>
-            <span className="text-[13px] font-semibold flex-1">{t("service_materials_only_title")}</span>
-            <ChevronDownIcon size={15} className="opacity-30" style={{ transform: "rotate(-90deg)" }} />
+          <button onClick={() => { haptic("light"); setServiceModalType("materials_only"); }} className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl text-center active:scale-95 transition-transform aspect-square" style={{ background: "var(--soft-green-bg, #DCFCE7)" }}>
+            <Paperclip size={22} style={{ color: GREEN_D }} />
+            <span className="text-[11px] font-semibold leading-tight" style={{ color: GREEN_D }}>{t("service_materials_only_title")}</span>
           </button>
         </div>
       </Card>
@@ -1031,33 +1007,83 @@ function ScheduleTab({ student, t, lang }) {
   );
 }
 
-function RatingTab({ student, t }) {
-  const groupmates = student.groupmates || [];
-  const myGroups = student.groups || [];
-  const myRankIndex = groupmates.findIndex((m) => m.id === student.id);
-  // Запоминаем место в рейтинге с прошлого раза, когда открывали приложение — сравниваем один
-  // раз при первом открытии экрана (не при каждом фоновом обновлении, иначе стрелка никогда бы
-  // не показывалась, гонка сама с собой). Ключ — свой на каждого привязанного ученика.
+function FinanceTab({ student, t, lang }) {
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  const hasDebt = (student.debt || 0) > 0;
+  const currency = lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS";
+  return (
+    <div className="space-y-3">
+      <div className="rounded-3xl p-5 text-white relative overflow-hidden" style={{ background: hasDebt ? `linear-gradient(135deg, ${RED}, ${RED_D})` : `linear-gradient(135deg, ${GREEN}, ${GREEN_D})` }}>
+        <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
+        <p className="text-[11px] font-medium opacity-85 uppercase tracking-wide flex items-center gap-1.5"><Wallet size={13} />{hasDebt ? t("debt_label") : t("no_debt")}</p>
+        <div className="text-[26px] font-extrabold mt-1">{fmt(student.debt || 0)} <span className="text-[13px] font-medium opacity-80">{currency}</span></div>
+        {student.discount > 0 && (
+          <div className="text-[11.5px] font-semibold mt-2 px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: "rgba(255,255,255,0.2)" }}><PartyPopper size={12} /> {t("discount_label", { pct: student.discount })}</div>
+        )}
+        {(student.prepaidCredit || 0) > 0 && (
+          <div className="text-[11.5px] font-semibold mt-2 px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: "rgba(255,255,255,0.2)" }}><PiggyBank size={12} /> {t("credit_note", { sum: fmt(student.prepaidCredit) })}</div>
+        )}
+      </div>
+
+      <Card className="p-4">
+        <h3 className="text-[13.5px] font-bold mb-2.5">{t("month_breakdown")}</h3>
+        {(student.monthlyDebts || []).length === 0 ? (
+          <EmptyState text={t("no_finance_data")} emoji="🧾" />
+        ) : (
+          <div className="space-y-1.5">
+            {[...student.monthlyDebts].sort((a, b) => b.month.localeCompare(a.month)).map((md) => (
+              <div key={md.month} className="flex items-center justify-between text-[12.5px] px-3 py-2 rounded-xl" style={{ background: "var(--surface-soft)" }}>
+                <span className="capitalize">{new Date(md.month + "-01").toLocaleDateString(locale, { month: "long", year: "numeric" })}</span>
+                <span className="font-semibold">{fmt(md.amount)} {currency}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card className="p-4">
+        <h3 className="text-[13.5px] font-bold mb-2.5">{t("recent_payments")}</h3>
+        {(student.payments || []).length === 0 ? (
+          <EmptyState text={t("no_payments_yet")} emoji="💳" />
+        ) : (
+          <div className="space-y-1.5">
+            {[...student.payments].sort((a, b) => new Date(b.date) - new Date(a.date)).map((p, i) => (
+              <div key={i} className="flex items-center justify-between text-[12.5px]">
+                <span className="opacity-55 mono">{ruDate(p.date, locale)}</span>
+                <span className="font-semibold" style={{ color: GREEN_D }}>+{fmt(p.amount)} {currency}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function SingleGroupRating({ group, student, t }) {
+  const list = group.students || [];
+  const myIndex = list.findIndex((m) => m.id === student.id);
+  // Место в рейтинге ИМЕННО в этой группе — своя запись в памяти телефона на каждую группу
+  // отдельно (иначе смена места в одном предмете перепутывалась бы со сменой в другом).
   const [rankChange] = useState(() => {
-    if (myRankIndex < 0) return null;
+    if (myIndex < 0) return null;
     try {
-      const key = `gu_last_rank_${student.id}`;
+      const key = `gu_last_rank_${student.id}_${group.groupId}`;
       const prevRaw = localStorage.getItem(key);
-      localStorage.setItem(key, String(myRankIndex));
+      localStorage.setItem(key, String(myIndex));
       if (prevRaw === null) return null;
       const prevRank = Number(prevRaw);
-      if (prevRank === myRankIndex) return "same";
-      return prevRank > myRankIndex ? "up" : "down"; // индекс меньше = место выше = поднялся
+      if (prevRank === myIndex) return "same";
+      return prevRank > myIndex ? "up" : "down";
     } catch { return null; }
   });
-  if (myGroups.length === 0) return <EmptyState text={t("rating_no_group")} icon={Trophy} />;
   const podiumBg = ["linear-gradient(135deg,#FCD34D,#F59E0B)", "linear-gradient(135deg,#D1D5DB,#9CA3AF)", "linear-gradient(135deg,#FCA5A5,#EA580C)"];
   return (
     <div className="space-y-3">
       <div className="rounded-3xl p-5 text-white text-center" style={{ background: `linear-gradient(135deg, ${GOLD}, #B45309)` }}>
         <Trophy size={26} className="mx-auto" />
-        <h2 className="text-[16px] font-bold mt-1">{t("rating_title")}</h2>
-        <p className="text-[12px] opacity-85 mt-0.5">{t("rating_subtitle", { name: myGroups.map((g) => g.name).join(", ") })}</p>
+        <h2 className="text-[16px] font-bold mt-1">{group.groupName}</h2>
+        <p className="text-[12px] opacity-85 mt-0.5">{group.course}</p>
         {rankChange && rankChange !== "same" && (
           <div className="inline-flex items-center gap-1 mt-2 px-2.5 py-1 rounded-full text-[11px] font-bold" style={{ background: "rgba(255,255,255,0.2)" }}>
             {rankChange === "up" ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
@@ -1065,11 +1091,11 @@ function RatingTab({ student, t }) {
           </div>
         )}
       </div>
-      {groupmates.length === 0 ? (
+      {list.length === 0 ? (
         <EmptyState text={t("rating_empty")} emoji="👥" />
       ) : (
         <Card className="p-2">
-          {groupmates.map((m, i) => {
+          {list.map((m, i) => {
             const isMe = m.id === student.id;
             return (
               <div key={m.id} className="flex items-center gap-3 px-2.5 py-2.5 rounded-2xl" style={{ background: isMe ? RED_L : "transparent" }}>
@@ -1093,6 +1119,31 @@ function RatingTab({ student, t }) {
           })}
         </Card>
       )}
+    </div>
+  );
+}
+function RatingTab({ student, t }) {
+  const ratingByGroup = student.ratingByGroup || [];
+  const [activeGroupId, setActiveGroupId] = useState(ratingByGroup[0]?.groupId || "");
+  if (ratingByGroup.length === 0) return <EmptyState text={t("rating_no_group")} icon={Trophy} />;
+  const activeGroup = ratingByGroup.find((g) => g.groupId === activeGroupId) || ratingByGroup[0];
+  return (
+    <div className="space-y-3">
+      {ratingByGroup.length > 1 && (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {ratingByGroup.map((g) => (
+            <button
+              key={g.groupId}
+              onClick={() => { haptic("light"); setActiveGroupId(g.groupId); }}
+              className="shrink-0 px-3.5 py-2 rounded-full text-[12.5px] font-semibold transition-colors"
+              style={{ background: activeGroup.groupId === g.groupId ? RED : "var(--surface-soft)", color: activeGroup.groupId === g.groupId ? "#fff" : "var(--ink)" }}
+            >
+              {g.groupName}
+            </button>
+          ))}
+        </div>
+      )}
+      <SingleGroupRating group={activeGroup} student={student} t={t} />
     </div>
   );
 }
@@ -1356,20 +1407,6 @@ function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme
           </Card>
         );
       })()}
-      {(student.payments || []).length > 0 && (
-        <Card className="p-4">
-          <h3 className="text-[13.5px] font-bold mb-2.5">{t("recent_payments")}</h3>
-          <div className="space-y-1.5">
-            {[...student.payments].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 6).map((p, i) => (
-              <div key={i} className="flex items-center justify-between text-[12.5px]">
-                <span className="opacity-55 mono">{ruDate(p.date, locale)}</span>
-                <span className="font-semibold" style={{ color: GREEN_D }}>+{fmt(p.amount)} {lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS"}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
       <FaqSection t={t} />
 
       <Card className="p-4">
@@ -1471,7 +1508,8 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
 /* ----------------------------------- Переводы ----------------------------------- */
 const TRANSLATIONS = {
   ru: {
-    tab_home: "Главная", tab_schedule: "Расписание", tab_rating: "Рейтинг", tab_shop: "Магазин", tab_profile: "Профиль",
+    tab_home: "Главная", tab_schedule: "Расписание", tab_finance: "Финансы", tab_rating: "Рейтинг", tab_shop: "Магазин", tab_profile: "Профиль",
+    debt_label: "Задолженность", no_debt: "Долгов нет", no_finance_data: "Пока нет данных о начислениях", no_payments_yet: "Пока нет оплат",
     mon: "Понедельник", tue: "Вторник", wed: "Среда", thu: "Четверг", fri: "Пятница", sat: "Суббота", sun: "Воскресенье",
     today_badge: "Сегодня", no_lessons_day: "Занятий нет",
     balance: "Баланс", debt: "Долг", debt_none: "Долгов нет", debt_credit_note: "В счёт след. месяца",
@@ -1554,7 +1592,8 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Победы на олимпиадах, высокие баллы на тестах и другие достижения.",
   },
   en: {
-    tab_home: "Home", tab_schedule: "Schedule", tab_rating: "Rating", tab_shop: "Shop", tab_profile: "Profile",
+    tab_home: "Home", tab_schedule: "Schedule", tab_finance: "Finance", tab_rating: "Rating", tab_shop: "Shop", tab_profile: "Profile",
+    debt_label: "Outstanding balance", no_debt: "No debt", no_finance_data: "No charges yet", no_payments_yet: "No payments yet",
     mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday",
     today_badge: "Today", no_lessons_day: "No lessons",
     balance: "Balance", debt: "Debt", debt_none: "No debt", debt_credit_note: "Credit for next month",
@@ -1637,7 +1676,8 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Wins at olympiads, high test scores, and other achievements.",
   },
   uz: {
-    tab_home: "Asosiy", tab_schedule: "Dars jadvali", tab_rating: "Reyting", tab_shop: "Do'kon", tab_profile: "Profil",
+    tab_home: "Asosiy", tab_schedule: "Dars jadvali", tab_finance: "Moliya", tab_rating: "Reyting", tab_shop: "Do'kon", tab_profile: "Profil",
+    debt_label: "Qarzdorlik", no_debt: "Qarz yo'q", no_finance_data: "Hozircha hisoblar yo'q", no_payments_yet: "Hozircha to'lovlar yo'q",
     mon: "Dushanba", tue: "Seshanba", wed: "Chorshanba", thu: "Payshanba", fri: "Juma", sat: "Shanba", sun: "Yakshanba",
     today_badge: "Bugun", no_lessons_day: "Dars yo'q",
     balance: "Balans", debt: "Qarz", debt_none: "Qarz yo'q", debt_credit_note: "Keyingi oyga hisobga olinadi",
@@ -1732,6 +1772,7 @@ function tabsFor(t) {
   return [
     { key: "home", label: t("tab_home"), icon: Home },
     { key: "schedule", label: t("tab_schedule"), icon: Calendar },
+    { key: "finance", label: t("tab_finance"), icon: Wallet },
     { key: "rating", label: t("tab_rating"), icon: Trophy },
     { key: "shop", label: t("tab_shop"), icon: ShoppingBag },
     { key: "profile", label: t("tab_profile"), icon: User },
@@ -2162,6 +2203,7 @@ export default function ParentApp() {
         <div className="px-4">
           {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onRequestService={handleRequestService} />}
           {tab === "schedule" && <ScheduleTab student={student} t={t} lang={lang} />}
+          {tab === "finance" && <FinanceTab student={student} t={t} lang={lang} />}
           {tab === "rating" && <RatingTab student={student} t={t} />}
           {tab === "shop" && <ShopTab student={student} shopItems={shopItems} onRedeem={handleRedeem} redeeming={redeeming} t={t} lang={lang} />}
           {tab === "profile" && <ProfileTab student={student} onLogout={handleLogout} t={t} lang={lang} changeLang={changeLang} theme={theme} changeTheme={changeTheme} onUpdateAvatar={handleUpdateAvatar} />}
@@ -2174,9 +2216,9 @@ export default function ParentApp() {
           {tabsFor(t).map((tabItem) => {
             const active = tab === tabItem.key;
             return (
-              <button key={tabItem.key} onClick={() => { haptic("light"); setTab(tabItem.key); }} className="flex-1 flex flex-col items-center gap-1 py-3 rounded-2xl transition-all duration-150 active:scale-95" style={{ background: active ? RED_L : "transparent" }}>
-                <tabItem.icon size={18} style={{ color: active ? RED_D : "#9C9A90", opacity: active ? 1 : 0.7 }} />
-                <span className="text-[10px] font-semibold" style={{ color: active ? RED_D : "#9C9A90" }}>{tabItem.label}</span>
+              <button key={tabItem.key} onClick={() => { haptic("light"); setTab(tabItem.key); }} className="flex-1 flex flex-col items-center gap-0.5 py-2.5 rounded-2xl transition-all duration-150 active:scale-95" style={{ background: active ? RED_L : "transparent" }}>
+                <tabItem.icon size={16} style={{ color: active ? RED_D : "#9C9A90", opacity: active ? 1 : 0.7 }} />
+                <span className="text-[9px] font-semibold leading-none text-center" style={{ color: active ? RED_D : "#9C9A90" }}>{tabItem.label}</span>
               </button>
             );
           })}
