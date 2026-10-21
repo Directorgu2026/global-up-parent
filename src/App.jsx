@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import {
   Home, Trophy, ShoppingBag, User, Calendar, MapPin, CheckCircle2, XCircle, Clock,
   FileText, Link2, Wallet, Coins as CoinsIcon, PartyPopper, Megaphone, Flame,
@@ -179,6 +180,27 @@ async function submitHomeworkRequest(initData, phone, password, submitHomework) 
       method: "POST",
       headers: { "Content-Type": "application/json", apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
       body: JSON.stringify({ initData, phone, password, submitHomework }),
+      signal: controller.signal,
+    });
+    return await res.json();
+  } catch (e) {
+    if (e.name === "AbortError") return { error: translate(curLang, "server_timeout") };
+    return { error: translate(curLang, "server_unreachable", { msg: String(e?.message || e) }) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function submitQuizRequest(initData, phone, password, submitQuiz) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  let curLang = "ru";
+  try { curLang = localStorage.getItem("gu_lang") || "ru"; } catch {}
+  try {
+    const res = await fetch(EDGE_FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+      body: JSON.stringify({ initData, phone, password, submitQuiz }),
       signal: controller.signal,
     });
     return await res.json();
@@ -371,7 +393,8 @@ function ProgressCard({ log, generalGrades = [], materials = [], homework = [], 
   const gradePct = avgGrade != null ? Math.round((avgGrade / 5) * 100) : null;
 
   // Сколько заданий из выданных хотя бы раз были сданы (не важно, проверены уже или нет).
-  const submittedMaterialIds = new Set(homework.map((h) => h.materialId).filter(Boolean));
+  // Считаем ЗАКРЫТЫЕ ДЗ (сдано и, если был мини-тест, тест сдан). Для старых записей без поля closed — как раньше, по факту сдачи.
+  const submittedMaterialIds = new Set(homework.filter((h) => h.closed !== false).map((h) => h.materialId).filter(Boolean));
   const homeworkPct = materials.length ? Math.round((materials.filter((m) => submittedMaterialIds.has(m.id)).length / materials.length) * 100) : null;
 
   // Простой средний показатель: посещаемость + сданные ДЗ + оценки, без сложных весов —
@@ -600,11 +623,328 @@ function ConfettiOverlay({ amount, grade, onDone, t }) {
   );
 }
 
+// ----------------------------- Повторение темы + мини-тест («закрытие» ДЗ) -----------------------------
+// Экран на весь телефон: 1) объяснение (правило, схема, примеры, разбор своих ошибок, совет) — тест
+// открывается, только когда ученик дочитал до конца → 2) тест: 5 вопросов по одному на экран, у каждого
+// 4 варианта → 3) результат. Не сдал (меньше 4 из 5) — видит правильные ответы, заново читает объяснение
+// и получает НОВЫЕ вопросы. Пока тест не сдан, ДЗ не закрыто и оценка за него не выставляется.
+function lessonState(h) {
+  const lesson = h.aiLesson;
+  if (!lesson) return null;
+  const r = h.quizResult || null;
+  const attempts = r?.attempts || 0;
+  const max = lesson.maxAttempts || 10;
+  return {
+    lesson, result: r, attempts, passed: !!r?.passed,
+    regenerating: h.aiLessonStatus === "regenerating",
+    outOfAttempts: !r?.passed && attempts >= max && !h.quizWaived,
+    waived: !!h.quizWaived,
+    done: !!r?.passed || !!h.quizWaived,
+  };
+}
+
+function LessonCta({ h, t, onOpen }) {
+  if (h.aiLessonStatus === "generating") {
+    return (
+      <div className="mt-2 p-3 rounded-2xl flex items-center gap-2 text-[12.5px]" style={{ background: "var(--soft-purple-bg)", color: "var(--soft-purple-fg)" }}>
+        <Loader2 size={15} className="animate-spin shrink-0" />{t("lesson_generating")}
+      </div>
+    );
+  }
+  const st = lessonState(h);
+  if (!st) return null;
+  const topics = st.lesson.topics.map((x) => x.topic).join(", ");
+  const r = st.result;
+  let title, desc, tone = "purple", action = t("lesson_start");
+  if (st.done) { title = t("lesson_closed_title"); desc = st.waived ? t("lesson_waived") : t("lesson_passed_desc", { s: `${r.bestScore}/${r.total}` }); tone = "green"; action = null; }
+  else if (st.outOfAttempts) { title = t("lesson_out_title"); desc = t("lesson_out_desc"); tone = "red"; action = null; }
+  else if (st.regenerating) { title = t("lesson_failed_title", { s: `${r.lastScore}/${r.total}` }); desc = t("lesson_new_questions_wait"); tone = "red"; action = t("lesson_reread"); }
+  else if (r) { title = t("lesson_failed_title", { s: `${r.lastScore}/${r.total}` }); desc = t("lesson_failed_desc"); tone = "red"; action = t("lesson_reread"); }
+  else { title = t("lesson_cta_title"); desc = t("lesson_cta_desc", { topics, n: 5 }); }
+  const colors = { purple: { bg: "var(--soft-purple-bg)", fg: "var(--soft-purple-fg)" }, green: { bg: "var(--soft-green-bg)", fg: "var(--soft-green-fg)" }, red: { bg: "var(--soft-red-bg)", fg: "var(--soft-red-fg)" } }[tone];
+  return (
+    <button onClick={onOpen} className="mt-2 w-full p-3.5 rounded-2xl text-left flex items-center gap-3 active:scale-[0.99] transition-transform" style={{ background: colors.bg, color: colors.fg, border: action ? "2px solid currentColor" : "none" }}>
+      <div className="text-[26px] leading-none shrink-0">{st.done ? "✅" : r ? "🔁" : "📘"}</div>
+      <div className="flex-1 min-w-0">
+        <div className="text-[13.5px] font-bold">{title}</div>
+        <div className="text-[11.5px] opacity-85 mt-0.5">{desc}</div>
+      </div>
+      {action && <div className="text-[12px] font-bold px-3 py-1.5 rounded-full text-white shrink-0" style={{ background: colors.fg }}>{action}</div>}
+    </button>
+  );
+}
+
+function TopicReviewSheet({ h, t, onClose, onSubmitQuiz }) {
+  const st = lessonState(h);
+  const [step, setStep] = useState(() => (st && (st.done || st.result) ? "result" : "learn"));
+  const [qi, setQi] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [readDone, setReadDone] = useState(false);
+  const scrollRef = useRef(null);
+  const endRef = useRef(null);
+  useEffect(() => { scrollRef.current?.scrollTo?.(0, 0); }, [step, qi]);
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+  // Тест открывается, только когда ученик долистал объяснение до конца.
+  useEffect(() => {
+    if (step !== "learn" || readDone || !endRef.current) return;
+    if (typeof IntersectionObserver === "undefined") { setReadDone(true); return; }
+    const obs = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) setReadDone(true); }, { root: scrollRef.current, threshold: 0.5 });
+    obs.observe(endRef.current);
+    return () => obs.disconnect();
+  }, [step, readDone]);
+  if (!st) return null;
+  const { lesson } = st;
+  const quiz = lesson.quiz || [];
+  const q = quiz[qi];
+  const answered = (qq) => answers[qq.id] !== undefined;
+  const steps = [["learn", t("step_learn")], ["quiz", t("step_quiz")], ["result", t("step_result")]];
+  const review = st.result?.lastReview || [];
+  const canTakeQuiz = !st.done && !st.outOfAttempts && !st.regenerating && quiz.length > 0;
+
+  const finish = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    const res = await onSubmitQuiz(h.id, answers);
+    setSubmitting(false);
+    if (res) { setAnswers({}); setQi(0); setStep("result"); }
+  };
+  const restudy = () => { setReadDone(false); setAnswers({}); setQi(0); setStep("learn"); };
+
+  return createPortal(
+    <div className={`${document.querySelector(".theme-dark") ? "theme-dark" : "theme-light"} fixed inset-0 z-[120] flex flex-col`} style={{ background: "var(--paper)", color: "var(--ink)" }}>
+      <div className="shrink-0 px-4 pb-3" style={{ background: "var(--surface)", borderBottom: "1px solid var(--line)", paddingTop: "max(16px, env(safe-area-inset-top))" }}>
+        <div className="flex items-center justify-between gap-2 max-w-md mx-auto">
+          <h2 className="text-[16px] font-extrabold flex items-center gap-2">📘 {t("lesson_title")}</h2>
+          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }}><X size={16} /></button>
+        </div>
+        <div className="flex gap-1.5 mt-3 max-w-md mx-auto">
+          {steps.map(([key, label], i) => {
+            const idx = steps.findIndex((s) => s[0] === step);
+            return (
+              <div key={key} className="flex-1">
+                <div className="h-1.5 rounded-full" style={{ background: i <= idx ? BLUE : "var(--surface-alt)" }} />
+                <div className="text-[10.5px] mt-1 font-semibold" style={{ opacity: i === idx ? 1 : 0.45 }}>{label}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+        <div className="max-w-md mx-auto space-y-3">
+          {step === "learn" && (
+            <>
+              {st.result && !st.done && (
+                <div className="p-3 rounded-2xl text-[12.5px] font-semibold" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>🔁 {t("lesson_reread_note")}</div>
+              )}
+              {lesson.topics.map((tp, i) => (
+                <div key={i} className="rounded-3xl p-4" style={{ background: "var(--surface)", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+                  <div className="text-[11px] font-bold uppercase tracking-wide opacity-50">{t("lesson_topic")} {lesson.topics.length > 1 ? `${i + 1}/${lesson.topics.length}` : ""}</div>
+                  <div className="text-[19px] font-extrabold mt-0.5">{tp.topic}</div>
+                  <div className="mt-3 p-3 rounded-2xl" style={{ background: "var(--soft-blue-bg)" }}>
+                    <div className="text-[11px] font-bold mb-1" style={{ color: "var(--soft-blue-fg)" }}>📌 {t("lesson_rule")}</div>
+                    <div className="text-[14px] leading-relaxed">{tp.rule}</div>
+                    {tp.formula && <div className="mt-2 text-[14px] font-bold px-3 py-2 rounded-xl" style={{ background: "var(--surface)" }}>{tp.formula}</div>}
+                  </div>
+                  {tp.examples?.length > 0 && (
+                    <div className="mt-3">
+                      <div className="text-[11px] font-bold mb-1.5 opacity-60">💬 {t("lesson_examples")}</div>
+                      <div className="space-y-1.5">
+                        {tp.examples.map((ex, j) => (
+                          <div key={j} className="p-2.5 rounded-xl" style={{ background: "var(--surface-soft)" }}>
+                            <div className="text-[14px] font-semibold">{ex.text}</div>
+                            {ex.note && <div className="text-[12px] opacity-60 mt-0.5">{ex.note}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {tp.yourMistakes?.length > 0 && (
+                    <div className="mt-3">
+                      <div className="text-[11px] font-bold mb-1.5 opacity-60">✍️ {t("lesson_your_mistakes")}</div>
+                      <div className="space-y-1.5">
+                        {tp.yourMistakes.map((m, j) => (
+                          <div key={j} className="p-2.5 rounded-xl" style={{ background: "var(--soft-orange-bg)" }}>
+                            <div className="text-[13.5px]">
+                              <span className="line-through opacity-70" style={{ color: BRICK }}>{m.wrong}</span>
+                              <span className="mx-1.5">→</span>
+                              <b style={{ color: GREEN_D }}>{m.right}</b>
+                            </div>
+                            {m.why && <div className="text-[12px] opacity-70 mt-0.5">{m.why}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {tp.tip && <div className="mt-3 p-2.5 rounded-xl text-[12.5px]" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}>💡 <b>{t("lesson_tip")}:</b> {tp.tip}</div>}
+                </div>
+              ))}
+              <div ref={endRef} className="h-2" />
+            </>
+          )}
+
+          {step === "quiz" && q && (
+            <div className="rounded-3xl p-4" style={{ background: "var(--surface)", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+              <div className="flex items-center justify-between text-[11.5px] font-semibold opacity-60">
+                <span>{t("quiz_question", { i: qi + 1, n: quiz.length })}</span>
+                <span>{t("quiz_need", { n: Math.ceil(quiz.length * 0.8), t: quiz.length })}</span>
+              </div>
+              <div className="flex gap-1 mt-2">
+                {quiz.map((qq, i) => (
+                  <button key={qq.id} onClick={() => setQi(i)} className="flex-1 h-1.5 rounded-full" style={{ background: i === qi ? BLUE : answered(qq) ? "var(--soft-blue-fg)" : "var(--surface-alt)", opacity: i === qi ? 1 : answered(qq) ? 0.5 : 1 }} />
+                ))}
+              </div>
+              <div className="text-[17px] font-bold leading-snug mt-4">{q.question}</div>
+              <div className="mt-4 space-y-2">
+                {q.options.map((opt, oi) => {
+                  const sel = answers[q.id] === oi;
+                  return (
+                    <button key={oi} onClick={() => { haptic("light"); setAnswers((a) => ({ ...a, [q.id]: oi })); }} className="w-full text-left px-4 py-3.5 rounded-2xl text-[15px] font-medium flex items-center gap-3 transition-colors" style={{ background: sel ? "var(--soft-blue-bg)" : "var(--surface-soft)", border: `2px solid ${sel ? BLUE : "transparent"}` }}>
+                      <span className="w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold shrink-0" style={{ background: sel ? BLUE : "var(--surface-alt)", color: sel ? "#fff" : "var(--ink)" }}>{String.fromCharCode(65 + oi)}</span>
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {step === "result" && st.result && (
+            <>
+              <div className="rounded-3xl p-5 text-center" style={{ background: st.done ? "var(--soft-green-bg)" : "var(--soft-orange-bg)" }}>
+                <div className="text-[44px] leading-none">{st.done ? "🎉" : "💪"}</div>
+                <div className="text-[18px] font-extrabold mt-2">{st.done ? t("quiz_passed_title") : t("quiz_failed_title")}</div>
+                <div className="text-[30px] font-black mt-1" style={{ color: st.done ? GREEN_D : BRICK }}>{st.result.lastScore}/{st.result.total}</div>
+                <div className="text-[12px] opacity-75 mt-1">{st.done ? t("quiz_closed_note") : t("quiz_failed_note", { n: Math.ceil(st.result.total * 0.8), t: st.result.total })}</div>
+              </div>
+              {review.map((rq, i) => (
+                <div key={rq.id} className="rounded-2xl p-3.5" style={{ background: "var(--surface)", borderLeft: `4px solid ${rq.correct ? GREEN_D : BRICK}` }}>
+                  <div className="text-[12px] font-semibold opacity-60">{rq.correct ? "✅" : "❌"} {t("quiz_question", { i: i + 1, n: review.length })}</div>
+                  <div className="text-[14px] font-semibold mt-1">{rq.question}</div>
+                  <div className="text-[13px] mt-1.5">{t("quiz_your_answer")}: <b style={{ color: rq.correct ? GREEN_D : BRICK }}>{rq.given === null || rq.given === undefined ? t("quiz_no_answer") : rq.options[rq.given]}</b></div>
+                  {!rq.correct && <div className="text-[13px] mt-0.5">{t("quiz_correct_answer")}: <b style={{ color: GREEN_D }}>{rq.options[rq.correctIndex]}</b></div>}
+                  {!rq.correct && rq.hint && <div className="text-[12px] mt-1.5 p-2 rounded-lg" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}>💡 {rq.hint}</div>}
+                </div>
+              ))}
+              {st.outOfAttempts && <div className="p-3 rounded-2xl text-[12.5px]" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>{t("lesson_out_desc")}</div>}
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="shrink-0 px-4 pt-3" style={{ background: "var(--surface)", borderTop: "1px solid var(--line)", paddingBottom: "max(14px, env(safe-area-inset-bottom))" }}>
+        <div className="max-w-md mx-auto">
+          {step === "learn" && (st.done || st.outOfAttempts ? (
+            <button onClick={() => (st.result ? setStep("result") : onClose())} className="w-full py-3.5 rounded-2xl text-[15px] font-bold text-white" style={{ background: BLUE }}>{st.result ? t("quiz_back_to_result") : t("quiz_done")}</button>
+          ) : st.regenerating ? (
+            <div className="w-full py-3.5 rounded-2xl text-[14px] font-semibold text-center flex items-center justify-center gap-2" style={{ background: "var(--surface-alt)" }}><Loader2 size={15} className="animate-spin" />{t("lesson_new_questions_wait")}</div>
+          ) : (
+            <>
+              {!readDone && <div className="text-[11.5px] text-center opacity-60 mb-2">{t("lesson_read_to_unlock")}</div>}
+              <button onClick={() => { setStep("quiz"); setQi(0); }} disabled={!readDone || !canTakeQuiz} className="w-full py-3.5 rounded-2xl text-[15px] font-bold text-white disabled:opacity-40" style={{ background: BLUE }}>
+                {readDone ? `${t("lesson_go_quiz", { n: quiz.length })} →` : `🔒 ${t("lesson_go_quiz", { n: quiz.length })}`}
+              </button>
+            </>
+          ))}
+          {step === "quiz" && (
+            <div className="flex gap-2">
+              <button onClick={() => (qi === 0 ? setStep("learn") : setQi(qi - 1))} className="px-4 py-3.5 rounded-2xl text-[14px] font-semibold" style={{ background: "var(--surface-alt)" }}>←</button>
+              {qi < quiz.length - 1 ? (
+                <button onClick={() => setQi(qi + 1)} disabled={!answered(q)} className="flex-1 py-3.5 rounded-2xl text-[15px] font-bold text-white disabled:opacity-40" style={{ background: BLUE }}>{t("quiz_next")} →</button>
+              ) : (
+                <button onClick={finish} disabled={submitting || !quiz.every(answered)} className="flex-1 py-3.5 rounded-2xl text-[15px] font-bold text-white disabled:opacity-40 flex items-center justify-center gap-2" style={{ background: GREEN_D }}>
+                  {submitting && <Loader2 size={16} className="animate-spin" />}{submitting ? t("quiz_checking") : t("quiz_finish")}
+                </button>
+              )}
+            </div>
+          )}
+          {step === "result" && (st.done || st.outOfAttempts ? (
+            <button onClick={onClose} className="w-full py-3.5 rounded-2xl text-[15px] font-bold text-white" style={{ background: GREEN_D }}>{t("quiz_done")}</button>
+          ) : (
+            <button onClick={restudy} className="w-full py-3.5 rounded-2xl text-[15px] font-bold text-white" style={{ background: BLUE }}>📘 {t("lesson_restudy_btn")}</button>
+          ))}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// Предупреждения о допуске к уроку (правило «3 незакрытых ДЗ подряд — нет допуска»).
+function AdmissionBanner({ student, t, locale }) {
+  const list = (student.admission || []).filter((a) => a.mode !== "off" && a.streak >= Math.max(1, a.limit - 1));
+  if (list.length === 0) return null;
+  return (
+    <div className="space-y-2 mb-3">
+      {list.map((a) => {
+        const date = a.lessonStart ? new Date(a.lessonStart).toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long" }) : "";
+        const blocked = a.blocked;
+        const atLimit = a.streak >= a.limit;
+        const bg = blocked ? "var(--soft-red-bg)" : "var(--soft-yellow-bg)";
+        const fg = blocked ? "var(--soft-red-fg)" : "var(--soft-yellow-fg)";
+        return (
+          <div key={a.groupId} className="p-3.5 rounded-2xl" style={{ background: bg, color: fg, border: blocked ? "2px solid currentColor" : "none" }}>
+            <div className="text-[14px] font-extrabold">
+              {blocked ? `⛔ ${t("adm_blocked_title", { date })}` : a.overridden && atLimit ? `✅ ${t("adm_overridden", { date })}` : atLimit ? `⚠️ ${t("adm_warn_mode", { n: a.streak })}` : `⚠️ ${t("adm_warning", { n: a.streak })}`}
+            </div>
+            <div className="text-[12px] mt-1 opacity-90">{a.groupName} · {blocked ? t("adm_blocked_desc", { n: a.streak }) : t("adm_how_to_close")}</div>
+            <div className="mt-2 space-y-1">
+              {a.items.slice(0, 5).map((it) => (
+                <div key={it.materialId} className="text-[12px] px-2.5 py-1.5 rounded-lg" style={{ background: "var(--surface)", color: "var(--ink)" }}>
+                  <b>{new Date(it.date + "T12:00:00").toLocaleDateString(locale, { day: "numeric", month: "short" })}</b> · {it.text ? (it.text.length > 60 ? it.text.slice(0, 58) + "…" : it.text) : t("homework")} · <span className="opacity-60">{it.submitted ? t("adm_item_not_closed") : t("adm_item_not_sent")}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Одна строка разбора по упражнению: «Упр. 2 — ⚠️ 7/10» и под ней ошибки именно этого упражнения.
+function AiExerciseRow({ ex, t, defaultOpen, accent }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const icon = { ok: "✅", errors: "⚠️", not_done: "❌", unreadable: "🔍" }[ex.status] || "•";
+  const score = ex.total && ex.status !== "not_done" && ex.status !== "unreadable" ? `${ex.correct ?? "?"}/${ex.total}` : "";
+  const label = ex.status === "ok" ? t("ex_ok") : ex.status === "not_done" ? t("ex_not_done") : ex.status === "unreadable" ? t("ex_unreadable") : "";
+  return (
+    <div className="text-[12px]">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span>{icon}</span><b>{ex.name}</b>
+        {score && <span className="font-semibold" style={{ color: ex.status === "ok" ? GREEN_D : BRICK }}>{score}</span>}
+        {label && <span className="opacity-60">· {label}</span>}
+        {ex.notes?.length > 0 && (
+          <button onClick={() => setOpen((v) => !v)} className="text-[11.5px] font-semibold ml-auto" style={{ color: accent }}>
+            {open ? t("ex_hide_errors") : t("ex_errors_btn", { n: ex.notes.length })}
+          </button>
+        )}
+      </div>
+      {open && ex.notes?.length > 0 && (
+        <ol className="mt-1 mb-1 space-y-1 list-decimal pl-6">
+          {ex.notes.map((n, i) => (
+            <li key={i}>
+              {n.where && <span className="opacity-60">{n.where}: </span>}
+              <span style={{ color: BRICK }}>{n.problem}</span>{n.fix && <> → <b style={{ color: GREEN_D }}>{n.fix}</b></>}
+              {n.topic && <span className="opacity-50"> [{n.topic}]</span>}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 // Карточка одной сдачи ДЗ: статус, разбор нейросети, комментарий учителя.
 // Статусы: reviewed — проверил учитель; auto_accepted — принято нейросетью; pending — ждёт учителя
 // или нужно доработать (поле attention объясняет почему); aiStatus "checking" — нейросеть проверяет.
 const HW_REDO_REASONS = ["not_readable", "irrelevant", "not_done", "partial", "teacher_redo", "duplicate", "duplicate_other"];
-function HomeworkStatusCard({ h, isLatest, t, locale }) {
+function HomeworkStatusCard({ h, isLatest, t, locale, onOpenLesson }) {
   const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
   const [showNotes, setShowNotes] = useState(isLatest);
   const isRedo = h.status === "pending" && HW_REDO_REASONS.includes(h.attention) && h.aiStatus !== "checking";
@@ -614,6 +954,7 @@ function HomeworkStatusCard({ h, isLatest, t, locale }) {
   else if (h.aiStatus === "checking") { color = BLUE; icon = <Loader2 size={13} className="animate-spin" />; label = t("ai_checking"); }
   else if (isRedo) { color = BRICK; icon = <span>⚠️</span>; label = t("hw_needs_redo"); }
   const notes = h.aiReview?.notes || [];
+  const exercises = h.aiReview?.exercises || [];
   return (
     <div className="mb-2 p-2.5 rounded-xl" style={{ background: "var(--surface)", opacity: isLatest ? 1 : 0.65, border: isRedo && isLatest ? `1px solid ${BRICK}` : "none" }}>
       {!isLatest && <div className="text-[10.5px] font-semibold opacity-60 mb-1">{t("hw_previous_attempt")}</div>}
@@ -624,6 +965,7 @@ function HomeworkStatusCard({ h, isLatest, t, locale }) {
         )}
         <span className="opacity-50 font-normal ml-auto">{new Date(h.submittedAt).toLocaleDateString(locale, { day: "2-digit", month: "short" })}</span>
       </div>
+      {h.gradeLocked && <div className="text-[12px] mt-1.5 font-semibold" style={{ color: "var(--soft-purple-fg)" }}>🔒 {t("hw_grade_locked")}</div>}
       {isRedo && (
         <div className="text-[12.5px] mt-1.5">
           {h.attention === "teacher_redo" ? <>{t("hw_redo_teacher_redo")} <b>{h.teacherComment}</b></> : t(`hw_redo_${h.attention}`)}
@@ -645,11 +987,17 @@ function HomeworkStatusCard({ h, isLatest, t, locale }) {
           <MessageCircle size={13} className="shrink-0 mt-0.5" />{h.teacherComment}
         </div>
       )}
-      {h.aiStatus === "done" && h.aiReview && (h.aiReview.summary || notes.length > 0) && (
+      {h.aiStatus === "done" && h.aiReview && (h.aiReview.summary || notes.length > 0 || exercises.length > 0) && (
         <div className="mt-1.5 p-2.5 rounded-lg" style={{ background: "var(--soft-blue-bg, #DBEAFE)" }}>
           <div className="text-[11.5px] font-bold mb-1">🤖 {t("ai_title")}</div>
           {h.aiReview.summary && <div className="text-[12.5px]">{h.aiReview.summary}</div>}
-          {notes.length > 0 && (showNotes ? (
+          {exercises.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              <div className="text-[11px] opacity-60">{t("hw_checked_exercises", { n: exercises.length })}</div>
+              {exercises.map((ex, i) => <AiExerciseRow key={i} ex={ex} t={t} defaultOpen={isLatest && ex.status === "errors"} accent={BLUE} />)}
+            </div>
+          )}
+          {exercises.length === 0 && notes.length > 0 && (showNotes ? (
             <ol className="mt-2 space-y-1.5 list-decimal pl-4">
               {notes.map((n, i) => (
                 <li key={i} className="text-[12px]">
@@ -665,13 +1013,14 @@ function HomeworkStatusCard({ h, isLatest, t, locale }) {
           <div className="text-[10.5px] opacity-50 mt-1.5">{t("ai_disclaimer")}</div>
         </div>
       )}
+      {onOpenLesson && <LessonCta h={h} t={t} onOpen={() => onOpenLesson(h)} />}
     </div>
   );
 }
 
 // Сдача ДЗ прямо под заданием: если уже отправлено — показываем статус и файлы;
 // если ещё нет — маленькая форма (файлы + комментарий), разворачивается по кнопке.
-function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
+function HomeworkSubmitBox({ material, student, onSubmitHomework, onOpenLesson, t, locale }) {
   const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
   const [expanded, setExpanded] = useState(false);
   const [files, setFiles] = useState([]);
@@ -712,7 +1061,7 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
   return (
     <div className="mt-2.5 pt-2.5" style={{ borderTop: "1px dashed var(--soft-yellow-border)" }}>
       {mySubmissions.map((h, i) => (
-        <HomeworkStatusCard key={h.id} h={h} isLatest={i === 0} t={t} locale={locale} />
+        <HomeworkStatusCard key={h.id} h={h} isLatest={i === 0} t={t} locale={locale} onOpenLesson={onOpenLesson} />
       ))}
 
       {!expanded ? (
@@ -756,7 +1105,11 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
   );
 }
 
-function HomeTab({ student, notifications = [], t, lang, onSubmitHomework, onRequestService }) {
+function HomeTab({ student, notifications = [], t, lang, onSubmitHomework, onRequestService, onSubmitQuiz }) {
+  // Какое «повторение темы» сейчас открыто на весь экран (id сдачи ДЗ).
+  const [lessonSubId, setLessonSubId] = useState(null);
+  const lessonSub = lessonSubId ? (student.homework || []).find((h) => h.id === lessonSubId) : null;
+  const pendingLessons = (student.homework || []).filter((h) => { const st = lessonState(h); return st && !st.done && !st.outOfAttempts; });
   const locale = LOCALE_OF[lang] || "ru-RU";
   const [showCoinsInfo, setShowCoinsInfo] = useState(false);
   const [showOldHomework, setShowOldHomework] = useState(false);
@@ -777,6 +1130,7 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework, onReq
 
   return (
     <div className="space-y-3">
+      <AdmissionBanner student={student} t={t} locale={locale} />
       {urgentNotifications.map((n) => (
         <div key={n.id} className="rounded-3xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})`, boxShadow: "0 4px 20px rgba(220,38,38,0.35)" }}>
           <div className="flex items-start gap-3">
@@ -967,6 +1321,17 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework, onReq
       {/* ДЗ / материалы */}
       <Card className="p-4">
         <h3 className="text-[14.5px] font-bold mb-3 flex items-center gap-1.5"><FileText size={16} />{t("homework")}</h3>
+        {pendingLessons.length > 0 && (
+          <button onClick={() => setLessonSubId(pendingLessons[0].id)} className="w-full mb-3 p-3.5 rounded-2xl text-left flex items-center gap-3 text-white active:scale-[0.99] transition-transform" style={{ background: `linear-gradient(135deg, ${BLUE}, #7C3AED)` }}>
+            <div className="text-[28px] leading-none">📘</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[14px] font-extrabold">{t("lesson_banner")}</div>
+              <div className="text-[11.5px] opacity-90 mt-0.5 truncate">{pendingLessons[0].aiLesson.topics.map((x) => x.topic).join(", ")}{pendingLessons.length > 1 ? ` · +${pendingLessons.length - 1}` : ""}</div>
+            </div>
+            <div className="text-[12px] font-bold px-3 py-1.5 rounded-full shrink-0" style={{ background: "rgba(255,255,255,0.25)" }}>{t("lesson_open")}</div>
+          </button>
+        )}
+        {lessonSub && lessonSub.aiLesson && <TopicReviewSheet key={lessonSub.id} h={lessonSub} t={t} onClose={() => setLessonSubId(null)} onSubmitQuiz={onSubmitQuiz} />}
         {materials.length === 0 ? (
           <EmptyState text={t("no_homework")} emoji="🎉" />
         ) : (
@@ -978,7 +1343,7 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework, onReq
                   <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#B45309" }}>{new Date(m.date).toLocaleDateString(locale, { day: "2-digit", month: "long" })}</div>
                   {m.text && <div className="text-[13px] mt-1 leading-snug">{m.text}</div>}
                   {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-medium flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} className="inline mr-1 -mt-0.5" />{t("open_material")}</a>}
-                  <HomeworkSubmitBox material={m} student={student} onSubmitHomework={onSubmitHomework} t={t} locale={locale} />
+                  <HomeworkSubmitBox material={m} student={student} onSubmitHomework={onSubmitHomework} onOpenLesson={(h) => setLessonSubId(h.id)} t={t} locale={locale} />
                 </div>
               );
               return (
@@ -1581,6 +1946,8 @@ const TRANSLATIONS = {
     homework_pending: "Отправлено — ожидает проверки", homework_reviewed: "Проверено",
     homework_pick_photo: "Фото", homework_pick_file: "Файл", homework_note_placeholder: "Комментарий (необязательно)",
     ai_checking: "Нейросеть проверяет работу… обычно 10–30 секунд", ai_title: "Разбор от нейросети", ai_disclaimer: "Нейросеть может ошибаться. Если не согласны — напишите учителю.", hw_accepted: "Принято ✓", hw_needs_redo: "Нужно доработать", hw_previous_attempt: "Предыдущая попытка", hw_show_notes: "Показать пометки ({n})", hw_submit_fixed: "Отправить исправленную работу", hw_mostly_done_note: "Почти всё сделано 👍 Работу посмотрит учитель.", ai_submit_hint: "Работу сразу проверит нейросеть. Снимайте весь лист целиком, ровно, при хорошем свете, без бликов.", hw_redo_not_readable: "Фото не получилось разобрать. Переснимите ближе, при хорошем свете, весь лист целиком.", hw_redo_irrelevant: "Похоже, на фото не это задание. Проверьте и отправьте фото нужной работы.", hw_redo_not_done: "Задание не выполнено. Сделайте его и отправьте фото.", hw_redo_partial: "Выполнена только часть задания. Доделайте и отправьте ещё раз.", hw_redo_duplicate: "Это фото уже отправлялось раньше. Отправьте фото именно этой работы.", hw_redo_duplicate_other: "Такое фото уже отправлялось. Отправьте фото своей работы.", hw_redo_teacher_redo: "Учитель просит доработать:",
+    lesson_cta_title: "Закрой ДЗ: повтори тему и сдай мини-тест", lesson_cta_desc: "{topics} · {n} вопросов · нужно 4 из 5", lesson_start: "Начать", lesson_generating: "Готовим для тебя объяснение темы и мини-тест…", lesson_closed_title: "ДЗ закрыто ✓", lesson_passed_desc: "Мини-тест сдан: {s}", lesson_waived: "Учитель закрыл ДЗ без теста", lesson_out_title: "Попытки закончились", lesson_out_desc: "Тест не сдан за все попытки. Подойди к учителю — он поможет разобраться и закроет ДЗ.", lesson_failed_title: "Тест не сдан ({s})", lesson_failed_desc: "Изучи материал ещё раз — будут новые вопросы", lesson_new_questions_wait: "Готовим новые вопросы…", lesson_reread: "Изучить", lesson_reread_note: "Прочитай объяснение ещё раз внимательно — дальше будет тест с новыми вопросами.", lesson_read_to_unlock: "Дочитай объяснение до конца, чтобы открыть тест", lesson_restudy_btn: "Изучить материал заново", hw_grade_locked: "Оценка появится, когда сдашь мини-тест", quiz_need: "нужно {n} из {t}", quiz_closed_note: "ДЗ закрыто. Оценка выставлена.", quiz_failed_note: "Нужно минимум {n} из {t}. Посмотри правильные ответы, изучи материал заново — и пройди тест с новыми вопросами.", lesson_title: "Повторение темы", lesson_topic: "Тема", step_learn: "Объяснение", step_quiz: "Тест", step_result: "Результат", lesson_rule: "Правило", lesson_examples: "Примеры", lesson_your_mistakes: "Твои ошибки", lesson_tip: "Совет", lesson_go_quiz: "К тесту ({n} вопросов)", quiz_question: "Вопрос {i} из {n}", quiz_next: "Далее", quiz_finish: "Проверить ответы", quiz_checking: "Проверяем…", quiz_passed_title: "Отлично! Тема усвоена", quiz_failed_title: "Пока не получилось", quiz_your_answer: "Твой ответ", quiz_correct_answer: "Правильно", quiz_no_answer: "нет ответа", quiz_done: "Готово", quiz_back_to_result: "К результату теста", lesson_banner: "Закрой ДЗ: повтори тему и сдай мини-тест", lesson_open: "Открыть", adm_blocked_title: "Нет допуска к уроку ({date})", adm_blocked_desc: "не закрыто ДЗ подряд: {n}. Закрой хотя бы одно — допуск вернётся.", adm_warning: "Не закрыто ДЗ подряд: {n}. Ещё одно — и не будет допуска к уроку", adm_warn_mode: "Не закрыто ДЗ подряд: {n}", adm_overridden: "Учитель допустил тебя к уроку ({date})", adm_how_to_close: "Закрыть ДЗ = сдать работу и сдать мини-тест (если он выдан)", adm_item_not_closed: "сдано, но не закрыто", adm_item_not_sent: "не сдано",
+    ex_ok: "без ошибок", ex_not_done: "не выполнено", ex_unreadable: "не разобрать", ex_errors_btn: "ошибки ({n})", ex_hide_errors: "скрыть", hw_checked_exercises: "Проверено упражнений: {n}",
     homework_send: "Отправить", cancel: "Отмена", homework_sent: "Домашнее задание отправлено", avatar_updated: "Фото обновлено",
     important_notice: "Важное уведомление",
     your_balance: "Ваш баланс", shop_empty: "Магазин пока пуст", buy: "Купить", buy_confirm: "Точно купить?",
@@ -1666,6 +2033,8 @@ const TRANSLATIONS = {
     homework_pending: "Submitted — awaiting review", homework_reviewed: "Reviewed",
     homework_pick_photo: "Photo", homework_pick_file: "File", homework_note_placeholder: "Comment (optional)",
     ai_checking: "The AI is checking your work… usually 10–30 seconds", ai_title: "AI review", ai_disclaimer: "The AI can make mistakes. If you disagree, message your teacher.", hw_accepted: "Accepted ✓", hw_needs_redo: "Needs more work", hw_previous_attempt: "Previous attempt", hw_show_notes: "Show notes ({n})", hw_submit_fixed: "Send the corrected work", hw_mostly_done_note: "Almost done 👍 Your teacher will take a look.", ai_submit_hint: "The AI will check your work right away. Photograph the whole page, straight, in good light, without glare.", hw_redo_not_readable: "We couldn't read the photo. Retake it closer, in good light, with the whole page.", hw_redo_irrelevant: "This doesn't look like this task. Check and send a photo of the right work.", hw_redo_not_done: "The task isn't done. Do it and send a photo.", hw_redo_partial: "Only part of the task is done. Finish it and send again.", hw_redo_duplicate: "This photo was already sent before. Please send a photo of this work.", hw_redo_duplicate_other: "This photo was already sent. Please send a photo of your own work.", hw_redo_teacher_redo: "Your teacher asks you to improve it:",
+    lesson_cta_title: "Close your homework: review and pass a mini-test", lesson_cta_desc: "{topics} · {n} questions · need 4 of 5", lesson_start: "Start", lesson_generating: "Preparing a topic review and mini-test for you…", lesson_closed_title: "Homework closed ✓", lesson_passed_desc: "Mini-test passed: {s}", lesson_waived: "Your teacher closed it without the test", lesson_out_title: "No attempts left", lesson_out_desc: "The test wasn't passed in all attempts. Talk to your teacher — they'll help and close the homework.", lesson_failed_title: "Test not passed ({s})", lesson_failed_desc: "Study the material again — new questions are coming", lesson_new_questions_wait: "Preparing new questions…", lesson_reread: "Study", lesson_reread_note: "Read the explanation carefully again — the next test will have new questions.", lesson_read_to_unlock: "Read the explanation to the end to unlock the test", lesson_restudy_btn: "Study the material again", hw_grade_locked: "Your grade appears after you pass the mini-test", quiz_need: "need {n} of {t}", quiz_closed_note: "Homework closed. Grade is set.", quiz_failed_note: "You need at least {n} of {t}. Check the correct answers, study again — then take a test with new questions.", lesson_title: "Topic review", lesson_topic: "Topic", step_learn: "Explanation", step_quiz: "Test", step_result: "Result", lesson_rule: "Rule", lesson_examples: "Examples", lesson_your_mistakes: "Your mistakes", lesson_tip: "Tip", lesson_go_quiz: "To the test ({n} questions)", quiz_question: "Question {i} of {n}", quiz_next: "Next", quiz_finish: "Check answers", quiz_checking: "Checking…", quiz_passed_title: "Great! You've got it", quiz_failed_title: "Not yet", quiz_your_answer: "Your answer", quiz_correct_answer: "Correct", quiz_no_answer: "no answer", quiz_done: "Done", quiz_back_to_result: "Back to test result", lesson_banner: "Close your homework: review and pass a mini-test", lesson_open: "Open", adm_blocked_title: "Not admitted to the lesson ({date})", adm_blocked_desc: "homework not closed in a row: {n}. Close at least one to be admitted again.", adm_warning: "Homework not closed in a row: {n}. One more and you won't be admitted", adm_warn_mode: "Homework not closed in a row: {n}", adm_overridden: "Your teacher admitted you to the lesson ({date})", adm_how_to_close: "Close homework = submit the work and pass the mini-test (if given)", adm_item_not_closed: "sent, not closed", adm_item_not_sent: "not sent",
+    ex_ok: "no mistakes", ex_not_done: "not done", ex_unreadable: "unreadable", ex_errors_btn: "mistakes ({n})", ex_hide_errors: "hide", hw_checked_exercises: "Exercises checked: {n}",
     homework_send: "Send", cancel: "Cancel", homework_sent: "Homework submitted", avatar_updated: "Photo updated",
     important_notice: "Important notice",
     your_balance: "Your balance", shop_empty: "Shop is empty for now", buy: "Buy", buy_confirm: "Confirm purchase?",
@@ -1751,6 +2120,8 @@ const TRANSLATIONS = {
     homework_pending: "Yuborildi — tekshiruv kutilmoqda", homework_reviewed: "Tekshirildi",
     homework_pick_photo: "Foto", homework_pick_file: "Fayl", homework_note_placeholder: "Izoh (ixtiyoriy)",
     ai_checking: "Sun'iy intellekt ishni tekshirmoqda… odatda 10–30 soniya", ai_title: "Sun'iy intellekt tahlili", ai_disclaimer: "Sun'iy intellekt xato qilishi mumkin. Rozi bo'lmasangiz — o'qituvchiga yozing.", hw_accepted: "Qabul qilindi ✓", hw_needs_redo: "Qayta ishlash kerak", hw_previous_attempt: "Oldingi urinish", hw_show_notes: "Belgilarni ko'rsatish ({n})", hw_submit_fixed: "Tuzatilgan ishni yuborish", hw_mostly_done_note: "Deyarli hammasi bajarilgan 👍 Ishni o'qituvchi ko'radi.", ai_submit_hint: "Ishni darhol sun'iy intellekt tekshiradi. Butun varaqni to'g'ri, yorug'da, yaltiramasdan suratga oling.", hw_redo_not_readable: "Rasmni o'qib bo'lmadi. Yaqinroq, yorug'da, butun varaqni qayta suratga oling.", hw_redo_irrelevant: "Rasmda bu vazifa emasga o'xshaydi. Tekshirib, kerakli ish rasmini yuboring.", hw_redo_not_done: "Vazifa bajarilmagan. Bajaring va rasmini yuboring.", hw_redo_partial: "Vazifaning faqat bir qismi bajarilgan. Tugatib, qayta yuboring.", hw_redo_duplicate: "Bu rasm avval yuborilgan. Aynan shu ish rasmini yuboring.", hw_redo_duplicate_other: "Bu rasm avval yuborilgan. O'z ishingiz rasmini yuboring.", hw_redo_teacher_redo: "O'qituvchi qayta ishlashni so'rayapti:",
+    lesson_cta_title: "Vazifani yoping: mavzuni takrorlab, mini-testdan o'ting", lesson_cta_desc: "{topics} · {n} savol · 5 tadan 4 tasi kerak", lesson_start: "Boshlash", lesson_generating: "Siz uchun mavzu izohi va mini-test tayyorlanmoqda…", lesson_closed_title: "Vazifa yopildi ✓", lesson_passed_desc: "Mini-test topshirildi: {s}", lesson_waived: "O'qituvchi vazifani testsiz yopdi", lesson_out_title: "Urinishlar tugadi", lesson_out_desc: "Test barcha urinishlarda topshirilmadi. O'qituvchiga murojaat qiling — u yordam beradi va vazifani yopadi.", lesson_failed_title: "Test topshirilmadi ({s})", lesson_failed_desc: "Materialni qayta o'rganing — yangi savollar bo'ladi", lesson_new_questions_wait: "Yangi savollar tayyorlanmoqda…", lesson_reread: "O'rganish", lesson_reread_note: "Izohni yana diqqat bilan o'qing — keyingi testda yangi savollar bo'ladi.", lesson_read_to_unlock: "Testni ochish uchun izohni oxirigacha o'qing", lesson_restudy_btn: "Materialni qayta o'rganish", hw_grade_locked: "Baho mini-testni topshirgach paydo bo'ladi", quiz_need: "{t} tadan {n} ta kerak", quiz_closed_note: "Vazifa yopildi. Baho qo'yildi.", quiz_failed_note: "Kamida {t} tadan {n} ta kerak. To'g'ri javoblarni ko'ring, qayta o'rganing — so'ng yangi savollar bilan testdan o'ting.", lesson_title: "Mavzu takrori", lesson_topic: "Mavzu", step_learn: "Izoh", step_quiz: "Test", step_result: "Natija", lesson_rule: "Qoida", lesson_examples: "Misollar", lesson_your_mistakes: "Xatolaringiz", lesson_tip: "Maslahat", lesson_go_quiz: "Testga ({n} savol)", quiz_question: "{n} tadan {i}-savol", quiz_next: "Keyingi", quiz_finish: "Javoblarni tekshirish", quiz_checking: "Tekshirilmoqda…", quiz_passed_title: "Ajoyib! Mavzu o'zlashtirildi", quiz_failed_title: "Hozircha bo'lmadi", quiz_your_answer: "Javobingiz", quiz_correct_answer: "To'g'ri javob", quiz_no_answer: "javob yo'q", quiz_done: "Tayyor", quiz_back_to_result: "Test natijasiga", lesson_banner: "Vazifani yoping: mavzuni takrorlab, mini-testdan o'ting", lesson_open: "Ochish", adm_blocked_title: "Darsga ruxsat yo'q ({date})", adm_blocked_desc: "ketma-ket yopilmagan vazifalar: {n}. Bittasini yoping — ruxsat qaytadi.", adm_warning: "Ketma-ket yopilmagan vazifalar: {n}. Yana bittasi — darsga ruxsat bo'lmaydi", adm_warn_mode: "Ketma-ket yopilmagan vazifalar: {n}", adm_overridden: "O'qituvchi sizni darsga ruxsat berdi ({date})", adm_how_to_close: "Vazifani yopish = ishni topshirish va mini-testdan o'tish (agar berilgan bo'lsa)", adm_item_not_closed: "topshirilgan, yopilmagan", adm_item_not_sent: "topshirilmagan",
+    ex_ok: "xatosiz", ex_not_done: "bajarilmagan", ex_unreadable: "o'qib bo'lmaydi", ex_errors_btn: "xatolar ({n})", ex_hide_errors: "yashirish", hw_checked_exercises: "Tekshirilgan mashqlar: {n}",
     homework_send: "Yuborish", cancel: "Bekor qilish", homework_sent: "Uyga vazifa yuborildi", avatar_updated: "Rasm yangilandi",
     important_notice: "Muhim xabar",
     your_balance: "Balansingiz", shop_empty: "Do'kon hozircha bo'sh", buy: "Sotib olish", buy_confirm: "Rostdan sotib olasizmi?",
@@ -2017,7 +2388,7 @@ export default function ParentApp() {
 
   // Пока нейросеть проверяет чью-то работу — обновляем данные чаще (раз в 5 секунд), чтобы разбор
   // появился почти сразу. Как только проверок «в процессе» нет, возвращаемся к обычным 25 секундам.
-  const hasChecking = (students || []).some((st) => (st.homework || []).some((h) => h.aiStatus === "checking"));
+  const hasChecking = (students || []).some((st) => (st.homework || []).some((h) => h.aiStatus === "checking" || h.aiLessonStatus === "generating" || h.aiLessonStatus === "regenerating"));
   useEffect(() => {
     if (!hasChecking) return;
     const fast = setInterval(() => silentRefresh(), 5000);
@@ -2091,6 +2462,27 @@ export default function ParentApp() {
       setToast(t("server_unreachable", { msg: String(e?.message || e) }));
       setTimeout(() => setToast(""), 3500);
       return { ok: false };
+    } finally {
+      pendingMutationsRef.current--;
+    }
+  };
+
+  // Сдача мини-теста после повторения темы — проверяет сервер, сюда приходит результат.
+  const handleSubmitQuiz = async (submissionId, answers) => {
+    if (!student) return null;
+    pendingMutationsRef.current++;
+    try {
+      const data = await submitQuizRequest(initData, phone.trim() || null, password.trim() || null, { studentId: student.id, submissionId, answers });
+      if (data.error) { haptic("error"); setToast(data.error); setTimeout(() => setToast(""), 3500); return null; }
+      if (!data.linked) { haptic("error"); setToast(t("identity_error")); setTimeout(() => setToast(""), 4000); return null; }
+      applyStudents(data.students);
+      lastMutationAppliedRef.current++;
+      haptic(data.quiz?.passed ? "success" : "warning");
+      return data.quiz;
+    } catch (e) {
+      setToast(t("server_unreachable", { msg: String(e?.message || e) }));
+      setTimeout(() => setToast(""), 3500);
+      return null;
     } finally {
       pendingMutationsRef.current--;
     }
@@ -2265,7 +2657,7 @@ export default function ParentApp() {
         <div className="px-4"><EmptyState text={t("empty_student")} /></div>
       ) : (
         <div className="px-4">
-          {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onRequestService={handleRequestService} />}
+          {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onRequestService={handleRequestService} onSubmitQuiz={handleSubmitQuiz} />}
           {tab === "schedule" && <ScheduleTab student={student} t={t} lang={lang} />}
           {tab === "rating" && <RatingTab student={student} t={t} />}
           {tab === "shop" && <ShopTab student={student} shopItems={shopItems} onRedeem={handleRedeem} redeeming={redeeming} t={t} lang={lang} />}
