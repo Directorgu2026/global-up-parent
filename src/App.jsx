@@ -56,7 +56,7 @@ const {
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v17";
+const APP_VERSION = "v20";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
 
@@ -125,7 +125,7 @@ const THEME_VARS = `
   }
   input, textarea, select { font-size: 16px !important; }
   .theme-light {
-    --paper: #F5F4F0; --ink: #1C1B18; --ink-2: #6B6960; --ink-3: #A19F95; --line: #EFEDE7; --surface: #FFFFFF;
+    --paper: #F5F4F0; --ink: #1C1B18; --ink-2: #6B6960; --ink-3: #A19F95; --ink-sub: #ABA99F; --line: #EFEDE7; --surface: #FFFFFF;
     --surface-soft: #F6F7FB; --surface-alt: #EEEEE8;
     --soft-red-bg: #FEE2E2; --soft-red-fg: #991B1B;
     --soft-yellow-bg: #FEF9C3; --soft-yellow-bg-2: #FFFBEB; --soft-yellow-border: #FEF3C7; --soft-yellow-fg: #854D0E;
@@ -135,7 +135,7 @@ const THEME_VARS = `
     --soft-orange-bg: #FFF7ED; --notice-border: #FDE68A;
   }
   .theme-dark {
-    --paper: #16171C; --ink: #F1F0EA; --ink-2: #A9A8A0; --ink-3: #75746D; --line: #2C2D33; --surface: #202127;
+    --paper: #16171C; --ink: #F1F0EA; --ink-2: #A9A8A0; --ink-3: #75746D; --ink-sub: #7A7972; --line: #2C2D33; --surface: #202127;
     --surface-soft: #23242B; --surface-alt: #2A2B32;
     --soft-red-bg: #3D2020; --soft-red-fg: #FCA5A5;
     --soft-yellow-bg: #3A3018; --soft-yellow-bg-2: #322A16; --soft-yellow-border: #453A1C; --soft-yellow-fg: #F3D28A;
@@ -1289,7 +1289,7 @@ function ListRow({ icon, tile, color, title, sub, right, onClick, last }) {
       <IconTile icon={icon} bg={tile} color={color} size={38} iconSize={19} radius={12} />
       <div className="min-w-0 flex-1">
         <div className="text-[14.5px] font-bold leading-tight" style={{ color: "var(--ink)" }}>{title}</div>
-        {sub && <div className="text-[12px] mt-0.5 truncate" style={{ color: "var(--ink-2)" }}>{sub}</div>}
+        {sub && <div className="text-[11.5px] mt-0.5 truncate" style={{ color: "var(--ink-sub)" }}>{sub}</div>}
       </div>
       {right}
       <ChevronRight size={17} style={{ color: "var(--ink-3)" }} className="shrink-0" />
@@ -1315,6 +1315,25 @@ function CardTitle({ children, right }) {
   );
 }
 
+// Квадратная плитка: иконка сверху, справа сверху — счётчик, внизу — название и короткая подпись.
+function SquareTile({ icon, tile, color, title, sub, badge, onClick }) {
+  return (
+    <button onClick={() => { haptic("light"); onClick && onClick(); }} className="aspect-square rounded-[22px] p-3 flex flex-col justify-between text-left active:scale-[0.96] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 4px 16px rgba(26,26,23,0.06)" }}>
+      <div className="flex items-start justify-between w-full gap-1">
+        <IconTile icon={icon} bg={tile} color={color} size={38} iconSize={19} radius={12} />
+        {badge}
+      </div>
+      <div className="min-w-0 w-full">
+        <div className="text-[13.5px] font-bold leading-tight" style={{ color: "var(--ink)" }}>{title}</div>
+        {sub && <div className="text-[11px] mt-0.5 truncate" style={{ color: "var(--ink-sub)" }}>{sub}</div>}
+      </div>
+    </button>
+  );
+}
+function SectionLabel({ children }) {
+  return <div className="text-[12px] font-bold uppercase tracking-[0.06em] px-1 pt-1.5 -mb-0.5" style={{ color: "var(--ink-3)" }}>{children}</div>;
+}
+
 // ------------------------------- Главная (минималистичная) -------------------------------
 // На главной — только самое нужное: деньги, ближайший урок, срочное, «Учёба» (ДЗ и прогресс — открываются
 // отдельным экраном) и «Сервис». Всё подробное (задания, посещаемость, группы, объявления) — на своих экранах.
@@ -1327,7 +1346,9 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
   const currency = lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS";
   const urgent = notifications.filter((n) => n.urgent);
   const normal = notifications.filter((n) => !n.urgent);
-  const lessons = upcomingLessons(student.groups);
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => { const id = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(id); }, []);
+  const lessons = upcomingLessons(student.groups, now);
   const admissionOf = (gid) => (student.admission || []).find((a) => a.groupId === gid);
   const tasks = computeHomeworkTasks(student);
   const actionable = tasks.filter((x) => x.kind !== "checking" && x.kind !== "preparing");
@@ -1338,60 +1359,69 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
   const attPct = log.length ? Math.round((log.filter((r) => r.present).length / log.length) * 100) : null;
   const grades = [...log.filter((r) => r.grade).map((r) => r.grade), ...(student.generalGrades || []).map((g) => g.value)];
   const avg = grades.length ? (grades.reduce((a, b) => a + b, 0) / grades.length).toFixed(1) : null;
-  const hwSub = actionable.length
-    ? t("hw_row_sub_todo", { what: actionable.slice(0, 2).map((x) => x.kind === "quiz" ? t("hw_task_quiz_title") : (x.m.text || t("homework"))).join(", ") })
-    : inProgress ? t("hw_task_checking_sub") : (student.materials || []).length ? t("hw_all_closed_title") : t("no_homework");
-  const progSub = [attPct != null && t("prog_row_att", { n: attPct }), avg && t("prog_row_avg", { n: avg })].filter(Boolean).join(" · ") || t("progress_none");
+  const hwSub = actionable.length ? t("hw_sub_todo") : inProgress ? t("hw_sub_checking") : (student.materials || []).length ? t("hw_sub_done") : null;
+  const progSub = [attPct != null && `${attPct}%`, avg && `${t("avg_short")} ${avg}`].filter(Boolean).join(" · ") || null;
   const glass = { background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(8px)" };
 
   return (
     <div className="space-y-3">
-      {/* Деньги — одна строка на шапке */}
-      <div className="grid grid-cols-2 gap-2.5">
-        <button onClick={() => (hasDebt ? setShowDebt(true) : null)} className="rounded-[18px] px-3 py-2.5 flex items-center gap-2.5 text-left text-white active:scale-[0.98] transition-transform" style={glass}>
-          <Wallet size={18} className="shrink-0" style={{ opacity: 0.9 }} />
-          <div className="min-w-0">
-            <div className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.72)" }}>{hasDebt ? t("debt") : t("balance")}</div>
-            <div className="text-[16px] font-extrabold leading-tight truncate">{fmt(hasDebt ? student.debt : (student.prepaidCredit || 0))} <span className="text-[11px] font-semibold" style={{ color: "rgba(255,255,255,0.72)" }}>{currency}</span></div>
+      {/* Ближайший урок — крупно прямо на красной шапке (вариант D) */}
+      <div className="text-white pt-4 pb-1">
+        {(student.groups || []).length === 0 || lessons.length === 0 ? (
+          <div className="py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.72)" }}>{t("next_lesson_label")}</div>
+            <div className="text-[17px] font-extrabold mt-1">{(student.groups || []).length === 0 ? t("no_group") : t("no_schedule")}</div>
           </div>
-        </button>
-        <button onClick={() => setShowCoinsInfo(true)} className="rounded-[18px] px-3 py-2.5 flex items-center gap-2.5 text-left text-white active:scale-[0.98] transition-transform" style={glass}>
-          <CoinsIcon size={18} className="shrink-0" style={{ opacity: 0.9 }} />
-          <div className="min-w-0 flex-1">
-            <div className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.72)" }}>GlobalCoins</div>
-            <div className="text-[16px] font-extrabold leading-tight">{student.coins} <span className="text-[11px] font-semibold" style={{ color: "rgba(255,255,255,0.72)" }}>GC</span></div>
-          </div>
-          <Info size={15} className="shrink-0" style={{ opacity: 0.75 }} />
-        </button>
+        ) : (() => {
+          const { group: g, date, isToday, start } = lessons[0];
+          const adm = admissionOf(g.id);
+          const isBlocked = !!adm?.blocked;
+          const end = atTime(date, g.end || g.start);
+          const mins = Math.round((start - now) / 60000);
+          const when = now >= start && now < end ? t("lesson_now") : mins <= 0 ? "" : mins < 60 ? t("lesson_in_min", { m: mins }) : isToday ? t("lesson_in_hm", { h: Math.floor(mins / 60), m: mins % 60 }) : null; // отсчёт — только для сегодняшнего урока
+          const dayLabel = isToday ? t("today_short") : date.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "short" });
+          return (
+            <>
+              <div className="flex items-end justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold uppercase tracking-wide truncate" style={{ color: "rgba(255,255,255,0.75)" }}>{dayLabel} · {g.name}</div>
+                  <div className="text-[46px] font-black leading-none mt-1.5" style={{ letterSpacing: "-1px" }}>{g.start}</div>
+                  <div className="text-[12px] mt-1.5 truncate" style={{ color: "rgba(255,255,255,0.8)" }}>{[g.room && `${t("room_short")} ${g.room}`, g.teacherName, when].filter(Boolean).join(" · ")}</div>
+                </div>
+                {adm && adm.mode !== "off" && (
+                  <span className="text-[11.5px] font-bold px-2.5 py-1 rounded-full shrink-0 inline-flex items-center gap-1 mb-1" style={{ background: "#fff", color: isBlocked ? RED_D : GREEN_D }}>
+                    {isBlocked ? <Ban size={12} /> : <Check size={12} />}{isBlocked ? t("adm_chip_no") : t("adm_chip_yes")}
+                  </span>
+                )}
+              </div>
+              {lessons.length > 1 && (
+                <div className="text-[11.5px] mt-2 truncate" style={{ color: "rgba(255,255,255,0.75)" }}>
+                  {t("lesson_also")}: {lessons.slice(1).map((x) => `${x.group.start} ${x.group.name}`).join(", ")}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
-      {/* Ближайший урок */}
-      <PlainCard className="py-3.5" style={{ boxShadow: "0 10px 30px rgba(26,26,23,0.12)" }}>
-        {(student.groups || []).length === 0 || lessons.length === 0 ? (
-          <div className="flex items-center gap-3"><IconTile icon={Calendar} bg="var(--surface-alt)" color="var(--ink-2)" /><p className="text-[13.5px]" style={{ color: "var(--ink-2)" }}>{(student.groups || []).length === 0 ? t("no_group") : t("no_schedule")}</p></div>
-        ) : (
-          <div className="space-y-3">
-            {lessons.map(({ group: g, date, isToday }) => {
-              const adm = admissionOf(g.id);
-              const isBlocked = !!adm?.blocked;
-              return (
-                <div key={g.id} className="flex items-center gap-3.5">
-                  <div className="w-[60px] h-[60px] rounded-[18px] flex flex-col items-center justify-center shrink-0" style={{ background: isBlocked ? "var(--soft-red-bg)" : "var(--soft-blue-bg)", color: isBlocked ? "var(--soft-red-fg)" : "var(--soft-blue-fg)" }}>
-                    <div className="text-[17px] font-black leading-none">{g.start}</div>
-                    <div className="text-[9.5px] font-bold uppercase mt-1">{isToday ? t("today_short") : date.toLocaleDateString(locale, { weekday: "short" })}</div>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink-3)" }}>{t("next_lesson_label")}</div>
-                    <div className="text-[16px] font-extrabold leading-tight truncate" style={{ color: "var(--ink)" }}>{g.name}</div>
-                    <div className="text-[12px] mt-0.5 truncate" style={{ color: "var(--ink-2)" }}>{[g.room && `${t("room_short")} ${g.room}`, g.teacherName].filter(Boolean).join(" · ")}</div>
-                  </div>
-                  {adm && adm.mode !== "off" && (isBlocked ? <Chip tone="red"><Ban size={12} />{t("adm_chip_no")}</Chip> : <Chip tone="green"><Check size={12} />{t("adm_chip_yes")}</Chip>)}
-                </div>
-              );
-            })}
+      {/* Деньги — белые карточки, наполовину заходят на шапку */}
+      <div className="grid grid-cols-2 gap-2.5 pt-3">
+        <button onClick={() => (hasDebt ? setShowDebt(true) : null)} className="rounded-[20px] p-3 flex items-center gap-2.5 text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 8px 24px rgba(26,26,23,0.10)" }}>
+          <IconTile icon={Wallet} bg={hasDebt ? "var(--soft-red-bg)" : "var(--soft-green-bg)"} color={hasDebt ? RED_D : GREEN_D} size={38} iconSize={18} radius={12} />
+          <div className="min-w-0">
+            <div className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink-3)" }}>{hasDebt ? t("debt") : t("balance")}</div>
+            <div className="text-[16px] font-extrabold leading-tight truncate" style={{ color: hasDebt ? RED_D : "var(--ink)" }}>{fmt(hasDebt ? student.debt : (student.prepaidCredit || 0))} <span className="text-[11px] font-semibold" style={{ color: "var(--ink-3)" }}>{currency}</span></div>
           </div>
-        )}
-      </PlainCard>
+        </button>
+        <button onClick={() => setShowCoinsInfo(true)} className="rounded-[20px] p-3 flex items-center gap-2.5 text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 8px 24px rgba(26,26,23,0.10)" }}>
+          <IconTile icon={CoinsIcon} bg="var(--soft-orange-bg)" color="#C2410C" size={38} iconSize={18} radius={12} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink-3)" }}>GlobalCoins</div>
+            <div className="text-[16px] font-extrabold leading-tight" style={{ color: "var(--ink)" }}>{student.coins} <span className="text-[11px] font-semibold" style={{ color: "var(--ink-3)" }}>GC</span></div>
+          </div>
+          <Info size={15} className="shrink-0" style={{ color: "var(--ink-3)" }} />
+        </button>
+      </div>
 
       {/* Срочное — коротко, по нажатию открывается подробно */}
       {(blocked.length > 0 || warned.length > 0 || urgent.length > 0) && (
@@ -1399,48 +1429,48 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
           {blocked.map((a) => (
             <button key={"b" + a.groupId} onClick={() => onOpenScreen("homework")} className="w-full rounded-[18px] px-3.5 py-3 flex items-center gap-3 text-left" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>
               <Ban size={18} className="shrink-0" />
-              <div className="min-w-0 flex-1"><div className="text-[13.5px] font-bold">{t("adm_home_blocked")}</div><div className="text-[11.5px] opacity-80">{t("adm_home_blocked_sub", { n: a.streak })}</div></div>
+              <div className="min-w-0 flex-1"><div className="text-[13.5px] font-bold">{t("adm_home_blocked")}</div><div className="text-[11.5px] opacity-60">{t("adm_home_blocked_short")}</div></div>
               <ChevronRight size={16} className="shrink-0 opacity-70" />
             </button>
           ))}
           {warned.map((a) => (
             <button key={"w" + a.groupId} onClick={() => onOpenScreen("homework")} className="w-full rounded-[18px] px-3.5 py-3 flex items-center gap-3 text-left" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}>
               <AlertTriangle size={18} className="shrink-0" />
-              <div className="min-w-0 flex-1"><div className="text-[13.5px] font-bold">{a.overridden && a.streak >= a.limit ? t("adm_home_override") : t("adm_home_warn", { n: a.streak })}</div><div className="text-[11.5px] opacity-80">{t("adm_home_warn_sub")}</div></div>
+              <div className="min-w-0 flex-1"><div className="text-[13.5px] font-bold">{a.overridden && a.streak >= a.limit ? t("adm_home_override") : t("adm_home_warn", { n: a.streak })}</div><div className="text-[11.5px] opacity-60">{t("adm_home_warn_short")}</div></div>
               <ChevronRight size={16} className="shrink-0 opacity-70" />
             </button>
           ))}
           {urgent.slice(0, 1).map((n) => (
             <button key={n.id} onClick={() => onOpenScreen("notices")} className="w-full rounded-[18px] px-3.5 py-3 flex items-center gap-3 text-left text-white" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
               <Megaphone size={18} className="shrink-0" />
-              <div className="min-w-0 flex-1"><div className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.75)" }}>{t("important_notice")}</div><div className="text-[13.5px] font-semibold leading-snug line-clamp-2">{n.text}</div></div>
+              <div className="min-w-0 flex-1"><div className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.75)" }}>{t("important_notice")}</div><div className="text-[13.5px] font-semibold leading-snug truncate">{n.text}</div></div>
               <ChevronRight size={16} className="shrink-0 opacity-80" />
             </button>
           ))}
         </div>
       )}
 
-      {/* Учёба: ДЗ и прогресс — каждый открывается своим экраном */}
-      <PlainCard>
-        <CardTitle>{t("study_title")}</CardTitle>
-        <ListRow icon={BookOpen} tile="var(--soft-purple-bg)" color={PURPLE} title={t("homework")} sub={hwSub} onClick={() => onOpenScreen("homework")}
-          right={actionable.length > 0 ? <Chip tone="red">{actionable.length}</Chip> : inProgress > 0 ? <Loader2 size={15} className="animate-spin shrink-0" style={{ color: BLUE }} /> : (student.materials || []).length ? <CheckCircle2 size={17} className="shrink-0" style={{ color: GREEN_D }} /> : null} />
-        <ListRow icon={TrendingUp} tile="var(--soft-green-bg)" color={GREEN_D} title={t("progress_title")} sub={progSub} onClick={() => onOpenScreen("progress")} />
-        <ListRow icon={Bell} tile="var(--soft-yellow-bg)" color="#B45309" title={t("notices_title")} sub={notifications.length ? notifications[0].text : t("notices_none")} onClick={() => onOpenScreen("notices")} last
-          right={normal.length + urgent.length > 0 ? <Chip tone="yellow">{normal.length + urgent.length}</Chip> : null} />
-      </PlainCard>
+      {/* Учёба: квадратные плитки — каждая открывает свой экран */}
+      <SectionLabel>{t("study_title")}</SectionLabel>
+      <div className="grid grid-cols-3 gap-2.5">
+        <SquareTile icon={BookOpen} tile="var(--soft-purple-bg)" color={PURPLE} title={t("homework_short")} sub={hwSub} onClick={() => onOpenScreen("homework")}
+          badge={actionable.length > 0 ? <Chip tone="red">{actionable.length}</Chip> : inProgress > 0 ? <Loader2 size={15} className="animate-spin" style={{ color: BLUE }} /> : (student.materials || []).length ? <CheckCircle2 size={17} style={{ color: GREEN_D }} /> : null} />
+        <SquareTile icon={TrendingUp} tile="var(--soft-green-bg)" color={GREEN_D} title={t("progress_short")} sub={progSub} onClick={() => onOpenScreen("progress")} />
+        <SquareTile icon={Bell} tile="var(--soft-yellow-bg)" color="#B45309" title={t("notices_title")} sub={notifications.length ? null : t("notices_none_short")} onClick={() => onOpenScreen("notices")}
+          badge={notifications.length > 0 ? <Chip tone="yellow">{notifications.length}</Chip> : null} />
+      </div>
 
-      {/* Сервис */}
-      <PlainCard>
-        <CardTitle>{t("service_section_title")}</CardTitle>
+      {/* Сервис — тоже квадратные плитки */}
+      <SectionLabel>{t("service_section_title")}</SectionLabel>
+      <div className="grid grid-cols-3 gap-2.5">
         {[
           { type: "support_lesson", icon: LifeBuoy, tile: "var(--soft-red-bg)", color: RED_D },
           { type: "topic_reexplain", icon: RefreshCw, tile: "var(--soft-blue-bg)", color: BLUE },
           { type: "materials_only", icon: Paperclip, tile: "var(--soft-green-bg)", color: GREEN_D },
-        ].map((s, i, arr) => (
-          <ListRow key={s.type} icon={s.icon} tile={s.tile} color={s.color} title={t(`service_${s.type}_title`)} sub={t(`service_${s.type}_sub`)} onClick={() => setServiceModalType(s.type)} last={i === arr.length - 1} />
+        ].map((x) => (
+          <SquareTile key={x.type} icon={x.icon} tile={x.tile} color={x.color} title={t(`service_${x.type}_short`)} onClick={() => setServiceModalType(x.type)} />
         ))}
-      </PlainCard>
+      </div>
 
       {serviceModalType && (
         <ServiceRequestModal type={serviceModalType} student={student} onClose={() => setServiceModalType(null)} onSubmit={(groupId, topic) => onRequestService(serviceModalType, groupId, topic)} t={t} />
@@ -1511,7 +1541,7 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
                 <IconTile icon={meta.icon} bg={meta.tile} color={meta.color} size={38} iconSize={18} radius={12} />
                 <div className="min-w-0 flex-1">
                   <div className="text-[14px] font-bold truncate" style={{ color: "var(--ink)" }}>{title}</div>
-                  <div className="text-[12px] truncate" style={{ color: "var(--ink-2)" }}>{new Date(task.m.date).toLocaleDateString(locale, { day: "numeric", month: "short" })} · {meta.sub}</div>
+                  <div className="text-[11.5px] truncate" style={{ color: "var(--ink-sub)" }}>{new Date(task.m.date).toLocaleDateString(locale, { day: "numeric", month: "short" })}</div>
                 </div>
                 {meta.btn ? <button onClick={() => openTask(task)} className="text-[12.5px] font-bold text-white px-3.5 py-2 rounded-xl shrink-0 active:scale-95 transition-transform" style={{ background: meta.color }}>{meta.btn}</button> : <Loader2 size={17} className="animate-spin shrink-0" style={{ color: BLUE }} />}
               </div>
@@ -1521,7 +1551,7 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
       ) : materials.length > 0 && (
         <PlainCard className="py-3.5 flex items-center gap-3">
           <IconTile icon={Trophy} bg="var(--soft-green-bg)" color={GREEN_D} />
-          <div><div className="text-[14px] font-bold" style={{ color: "var(--ink)" }}>{t("hw_all_closed_title")}</div><div className="text-[12px]" style={{ color: "var(--ink-2)" }}>{t("hw_all_closed_sub")}</div></div>
+          <div><div className="text-[14px] font-bold" style={{ color: "var(--ink)" }}>{t("hw_all_closed_title")}</div><div className="text-[11.5px]" style={{ color: "var(--ink-sub)" }}>{t("hw_all_closed_sub_short")}</div></div>
         </PlainCard>
       )}
       {lessonSub && lessonSub.aiLesson && <TopicReviewSheet key={lessonSub.id} h={lessonSub} t={t} onClose={() => setLessonSubId(null)} onSubmitQuiz={onSubmitQuiz} />}
@@ -1596,7 +1626,7 @@ function ProgressScreen({ student, t, lang }) {
                 <div className="min-w-0 flex-1">
                   <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: c1 }}>{g.course}</div>
                   <div className="text-[14.5px] font-bold" style={{ color: "var(--ink)" }}>{g.name}</div>
-                  <div className="text-[12px] mt-0.5" style={{ color: "var(--ink-2)" }}>{[scheduleText(g, t("no_schedule")), g.room && `${t("room_short")} ${g.room}`, g.teacherName].filter(Boolean).join(" · ")}</div>
+                  <div className="text-[11.5px] mt-0.5" style={{ color: "var(--ink-sub)" }}>{[scheduleText(g, t("no_schedule")), g.room && `${t("room_short")} ${g.room}`, g.teacherName].filter(Boolean).join(" · ")}</div>
                 </div>
               </div>
             );
@@ -2182,6 +2212,10 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
 /* ----------------------------------- Переводы ----------------------------------- */
 const TRANSLATIONS = {
   ru: {
+    lesson_now: "идёт сейчас", lesson_in_min: "через {m} мин", lesson_in_hm: "через {h} ч {m} мин", lesson_also: "Ещё сегодня",
+    homework_short: "Домашка", progress_short: "Прогресс", service_support_lesson_short: "Суппорт-урок", service_topic_reexplain_short: "Объяснить тему", service_materials_only_short: "Материалы",
+    hw_sub_todo: "Есть несданные", hw_sub_checking: "Проверяется", hw_sub_done: "Всё сдано", avg_short: "балл", notices_none_short: "Нет новых",
+    adm_home_blocked_short: "Закрой ДЗ, чтобы вернуть", adm_home_warn_short: "Закрой ДЗ до урока", hw_all_closed_sub_short: "Отлично!",
     study_title: "Учёба", hw_row_sub_todo: "Нужно: {what}", prog_row_att: "посещаемость {n}%", prog_row_avg: "средний балл {n}", notices_none: "Новых объявлений нет",
     service_support_lesson_sub: "Отдельный урок с учителем", service_topic_reexplain_sub: "Если тема осталась непонятной", service_materials_only_sub: "Презентация или материалы по теме",
     adm_home_blocked: "Нет допуска на урок", adm_home_blocked_sub: "Не закрыто ДЗ подряд: {n}. Нажми, чтобы закрыть", adm_home_warn: "Не закрыто ДЗ подряд: {n}", adm_home_warn_sub: "Закрой ДЗ, чтобы сохранить допуск", adm_home_override: "Учитель допустил тебя к уроку",
@@ -2279,6 +2313,10 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Победы на олимпиадах, высокие баллы на тестах и другие достижения.",
   },
   en: {
+    lesson_now: "in progress", lesson_in_min: "in {m} min", lesson_in_hm: "in {h} h {m} min", lesson_also: "Also today",
+    homework_short: "Homework", progress_short: "Progress", service_support_lesson_short: "Support lesson", service_topic_reexplain_short: "Explain a topic", service_materials_only_short: "Materials",
+    hw_sub_todo: "Not submitted yet", hw_sub_checking: "Being checked", hw_sub_done: "All done", avg_short: "avg", notices_none_short: "Nothing new",
+    adm_home_blocked_short: "Close your homework to get it back", adm_home_warn_short: "Close homework before class", hw_all_closed_sub_short: "Great job!",
     study_title: "Study", hw_row_sub_todo: "To do: {what}", prog_row_att: "attendance {n}%", prog_row_avg: "average {n}", notices_none: "No new announcements",
     service_support_lesson_sub: "A separate lesson with a teacher", service_topic_reexplain_sub: "If a topic is still unclear", service_materials_only_sub: "Slides or materials on a topic",
     adm_home_blocked: "Not admitted to class", adm_home_blocked_sub: "Homework not closed in a row: {n}. Tap to close it", adm_home_warn: "Homework not closed in a row: {n}", adm_home_warn_sub: "Close your homework to keep access", adm_home_override: "Your teacher admitted you to class",
@@ -2376,6 +2414,10 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Wins at olympiads, high test scores, and other achievements.",
   },
   uz: {
+    lesson_now: "hozir davom etmoqda", lesson_in_min: "{m} daqiqadan keyin", lesson_in_hm: "{h} soat {m} daqiqadan keyin", lesson_also: "Bugun yana",
+    homework_short: "Uy vazifa", progress_short: "Natijalar", service_support_lesson_short: "Qo'shimcha dars", service_topic_reexplain_short: "Mavzuni tushuntirish", service_materials_only_short: "Materiallar",
+    hw_sub_todo: "Topshirilmagan bor", hw_sub_checking: "Tekshirilmoqda", hw_sub_done: "Hammasi topshirildi", avg_short: "baho", notices_none_short: "Yangi yo'q",
+    adm_home_blocked_short: "Qaytarish uchun vazifani yoping", adm_home_warn_short: "Darsgacha vazifani yoping", hw_all_closed_sub_short: "Ajoyib!",
     study_title: "O'qish", hw_row_sub_todo: "Kerak: {what}", prog_row_att: "davomat {n}%", prog_row_avg: "o'rtacha {n}", notices_none: "Yangi e'lonlar yo'q",
     service_support_lesson_sub: "O'qituvchi bilan alohida dars", service_topic_reexplain_sub: "Mavzu tushunarsiz qolgan bo'lsa", service_materials_only_sub: "Mavzu bo'yicha taqdimot yoki materiallar",
     adm_home_blocked: "Darsga ruxsat yo'q", adm_home_blocked_sub: "Ketma-ket yopilmagan vazifa: {n}. Yopish uchun bosing", adm_home_warn: "Ketma-ket yopilmagan vazifa: {n}", adm_home_warn_sub: "Ruxsatni saqlash uchun vazifani yoping", adm_home_override: "O'qituvchi sizni darsga qo'ydi",
@@ -2946,7 +2988,7 @@ export default function ParentApp() {
       )}
 
       {/* Красная фирменная шапка: на главной она выше — на ней лежат баланс и монеты, а карточка урока «заходит» на неё. */}
-      <div aria-hidden className="absolute left-0 right-0 top-0 overflow-hidden pointer-events-none" style={{ height: tab === "home" && !screen ? "calc(var(--gu-safe-top, 0px) + 178px)" : "calc(var(--gu-safe-top, 0px) + 92px)", background: theme === "dark" ? "linear-gradient(160deg, #7F1D1D, #5B1414 55%, #3B0D0D)" : "linear-gradient(160deg, #EF4444, #B91C1C 60%, #7F1D1D)", borderRadius: "0 0 32px 32px", transition: "height .25s ease" }}>
+      <div aria-hidden className="absolute left-0 right-0 top-0 overflow-hidden pointer-events-none" style={{ height: tab === "home" && !screen ? "calc(var(--gu-safe-top, 0px) + 236px)" : "calc(var(--gu-safe-top, 0px) + 92px)", background: theme === "dark" ? "linear-gradient(160deg, #7F1D1D, #5B1414 55%, #3B0D0D)" : "linear-gradient(160deg, #EF4444, #B91C1C 60%, #7F1D1D)", borderRadius: "0 0 32px 32px", transition: "height .25s ease" }}>
         <div className="absolute rounded-full" style={{ width: 220, height: 220, right: -70, top: -60, background: "rgba(255,255,255,0.08)" }} />
         <div className="absolute rounded-full" style={{ width: 140, height: 140, left: -50, bottom: -50, background: "rgba(255,255,255,0.06)" }} />
       </div>
