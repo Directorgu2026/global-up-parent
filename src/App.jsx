@@ -600,6 +600,75 @@ function ConfettiOverlay({ amount, grade, onDone, t }) {
   );
 }
 
+// Карточка одной сдачи ДЗ: статус, разбор нейросети, комментарий учителя.
+// Статусы: reviewed — проверил учитель; auto_accepted — принято нейросетью; pending — ждёт учителя
+// или нужно доработать (поле attention объясняет почему); aiStatus "checking" — нейросеть проверяет.
+const HW_REDO_REASONS = ["not_readable", "irrelevant", "not_done", "partial", "teacher_redo", "duplicate", "duplicate_other"];
+function HomeworkStatusCard({ h, isLatest, t, locale }) {
+  const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
+  const [showNotes, setShowNotes] = useState(isLatest);
+  const isRedo = h.status === "pending" && HW_REDO_REASONS.includes(h.attention) && h.aiStatus !== "checking";
+  let color = "#B45309", icon = <Clock size={13} />, label = t("homework_pending");
+  if (h.status === "reviewed") { color = GREEN_D; icon = <CheckCircle2 size={13} />; label = t("homework_reviewed"); }
+  else if (h.status === "auto_accepted") { color = GREEN_D; icon = <CheckCircle2 size={13} />; label = t("hw_accepted"); }
+  else if (h.aiStatus === "checking") { color = BLUE; icon = <Loader2 size={13} className="animate-spin" />; label = t("ai_checking"); }
+  else if (isRedo) { color = BRICK; icon = <span>⚠️</span>; label = t("hw_needs_redo"); }
+  const notes = h.aiReview?.notes || [];
+  return (
+    <div className="mb-2 p-2.5 rounded-xl" style={{ background: "var(--surface)", opacity: isLatest ? 1 : 0.65, border: isRedo && isLatest ? `1px solid ${BRICK}` : "none" }}>
+      {!isLatest && <div className="text-[10.5px] font-semibold opacity-60 mb-1">{t("hw_previous_attempt")}</div>}
+      <div className="flex items-center gap-1.5 text-[11.5px] font-semibold" style={{ color }}>
+        {icon}{label}
+        {h.grade && (h.status === "reviewed" || h.status === "auto_accepted") && (
+          <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md text-white" style={{ background: gradeColors[h.grade] || GREEN_D }}>{h.grade}</span>
+        )}
+        <span className="opacity-50 font-normal ml-auto">{new Date(h.submittedAt).toLocaleDateString(locale, { day: "2-digit", month: "short" })}</span>
+      </div>
+      {isRedo && (
+        <div className="text-[12.5px] mt-1.5">
+          {h.attention === "teacher_redo" ? <>{t("hw_redo_teacher_redo")} <b>{h.teacherComment}</b></> : t(`hw_redo_${h.attention}`)}
+        </div>
+      )}
+      {h.status === "pending" && h.attention === "mostly_done" && <div className="text-[12px] mt-1.5 opacity-80">{t("hw_mostly_done_note")}</div>}
+      {h.note && <div className="text-[12.5px] mt-1 opacity-80">{h.note}</div>}
+      {h.files?.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          {h.files.map((f, i) => (
+            <a key={i} href={f.url} target="_blank" rel="noreferrer" className="text-[11px] font-medium px-2 py-1 rounded-lg flex items-center gap-1" style={{ background: "var(--surface-alt)" }}>
+              <Paperclip size={11} />{f.name.length > 16 ? f.name.slice(0, 14) + "…" : f.name}
+            </a>
+          ))}
+        </div>
+      )}
+      {h.status === "reviewed" && h.teacherComment && (
+        <div className="text-[12.5px] mt-1.5 p-2 rounded-lg flex items-start gap-1.5" style={{ background: "var(--soft-green-bg, #DCFCE7)" }}>
+          <MessageCircle size={13} className="shrink-0 mt-0.5" />{h.teacherComment}
+        </div>
+      )}
+      {h.aiStatus === "done" && h.aiReview && (h.aiReview.summary || notes.length > 0) && (
+        <div className="mt-1.5 p-2.5 rounded-lg" style={{ background: "var(--soft-blue-bg, #DBEAFE)" }}>
+          <div className="text-[11.5px] font-bold mb-1">🤖 {t("ai_title")}</div>
+          {h.aiReview.summary && <div className="text-[12.5px]">{h.aiReview.summary}</div>}
+          {notes.length > 0 && (showNotes ? (
+            <ol className="mt-2 space-y-1.5 list-decimal pl-4">
+              {notes.map((n, i) => (
+                <li key={i} className="text-[12px]">
+                  {n.where && <span className="opacity-60">{n.where}: </span>}
+                  <span style={{ color: BRICK }}>{n.problem}</span>
+                  {n.fix && <> → <b style={{ color: GREEN_D }}>{n.fix}</b></>}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <button onClick={() => setShowNotes(true)} className="text-[11.5px] font-semibold mt-1" style={{ color: BLUE }}>{t("hw_show_notes", { n: notes.length })}</button>
+          ))}
+          <div className="text-[10.5px] opacity-50 mt-1.5">{t("ai_disclaimer")}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Сдача ДЗ прямо под заданием: если уже отправлено — показываем статус и файлы;
 // если ещё нет — маленькая форма (файлы + комментарий), разворачивается по кнопке.
 function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
@@ -612,6 +681,10 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
   const docInputRef = useRef(null);
 
   const mySubmissions = (student.homework || []).filter((h) => h.materialId === material.id);
+  const aiOn = !!student.features?.aiHomework;
+  // Если хотя бы одна попытка по этому заданию уже принята — задание сделано, красная кнопка «переделать» не нужна.
+  const alreadyAccepted = mySubmissions.some((h) => h.status === "reviewed" || h.status === "auto_accepted");
+  const latestNeedsRedo = !alreadyAccepted && mySubmissions.length > 0 && mySubmissions[0].status === "pending" && HW_REDO_REASONS.includes(mySubmissions[0].attention) && mySubmissions[0].aiStatus !== "checking";
 
   // Важно: на iPhone, если смешать типы "фото" и "документы" в ОДНОМ поле выбора файла
   // (accept="image/*,.pdf,..."), система иногда прячет вариант "Галерея" и показывает только
@@ -638,40 +711,17 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, t, locale }) {
 
   return (
     <div className="mt-2.5 pt-2.5" style={{ borderTop: "1px dashed var(--soft-yellow-border)" }}>
-      {mySubmissions.map((h) => (
-        <div key={h.id} className="mb-2 p-2.5 rounded-xl" style={{ background: "var(--surface)" }}>
-          <div className="flex items-center gap-1.5 text-[11.5px] font-semibold" style={{ color: h.status === "reviewed" ? GREEN_D : "#B45309" }}>
-            {h.status === "reviewed" ? <CheckCircle2 size={13} /> : <Clock size={13} />}
-            {h.status === "reviewed" ? t("homework_reviewed") : t("homework_pending")}
-            {h.grade && (
-              <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md text-white" style={{ background: gradeColors[h.grade] || GREEN_D }}>{h.grade}</span>
-            )}
-            <span className="opacity-50 font-normal ml-auto">{new Date(h.submittedAt).toLocaleDateString(locale, { day: "2-digit", month: "short" })}</span>
-          </div>
-          {h.note && <div className="text-[12.5px] mt-1 opacity-80">{h.note}</div>}
-          {h.files?.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
-              {h.files.map((f, i) => (
-                <a key={i} href={f.url} target="_blank" rel="noreferrer" className="text-[11px] font-medium px-2 py-1 rounded-lg flex items-center gap-1" style={{ background: "var(--surface-alt)" }}>
-                  <Paperclip size={11} />{f.name.length > 16 ? f.name.slice(0, 14) + "…" : f.name}
-                </a>
-              ))}
-            </div>
-          )}
-          {h.status === "reviewed" && h.teacherComment && (
-            <div className="text-[12.5px] mt-1.5 p-2 rounded-lg flex items-start gap-1.5" style={{ background: "var(--soft-green-bg, #DCFCE7)" }}>
-              <MessageCircle size={13} className="shrink-0 mt-0.5" />{h.teacherComment}
-            </div>
-          )}
-        </div>
+      {mySubmissions.map((h, i) => (
+        <HomeworkStatusCard key={h.id} h={h} isLatest={i === 0} t={t} locale={locale} />
       ))}
 
       {!expanded ? (
-        <button onClick={() => setExpanded(true)} className="w-full text-[12.5px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5" style={{ background: "var(--surface)", color: BLUE }}>
-          <Upload size={14} />{mySubmissions.length > 0 ? t("homework_submit_again") : t("homework_submit")}
+        <button onClick={() => setExpanded(true)} className="w-full text-[12.5px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5" style={latestNeedsRedo ? { background: RED, color: "#fff" } : { background: "var(--surface)", color: BLUE }}>
+          <Upload size={14} />{latestNeedsRedo ? t("hw_submit_fixed") : mySubmissions.length > 0 ? t("homework_submit_again") : t("homework_submit")}
         </button>
       ) : (
         <div className="space-y-2">
+          {aiOn && <div className="text-[11.5px] p-2 rounded-lg" style={{ background: "var(--soft-blue-bg, #DBEAFE)" }}>🤖 {t("ai_submit_hint")}</div>}
           <div className="grid grid-cols-2 gap-2">
             <label className="text-[12.5px] font-semibold py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer" style={{ background: "var(--surface)", border: "1px solid var(--line)" }}>
               <ImageIcon size={15} />{t("homework_pick_photo")}
@@ -1291,7 +1341,7 @@ function computeAchievements(student) {
   let streak = 0;
   for (const r of log) { if (r.present) streak++; else break; }
   const homeworkDone = (student.homework || []).length;
-  const homeworkReviewed = (student.homework || []).filter((h) => h.status === "reviewed").length;
+  const homeworkReviewed = (student.homework || []).filter((h) => h.status === "reviewed" || h.status === "auto_accepted").length;
   const goodGrades = log.filter((r) => r.grade >= 4).length + (student.generalGrades || []).filter((g) => g.value >= 4).length;
 
   const list = [];
@@ -1530,6 +1580,7 @@ const TRANSLATIONS = {
     homework_submit: "Сдать работу", homework_submit_again: "Отправить ещё раз",
     homework_pending: "Отправлено — ожидает проверки", homework_reviewed: "Проверено",
     homework_pick_photo: "Фото", homework_pick_file: "Файл", homework_note_placeholder: "Комментарий (необязательно)",
+    ai_checking: "Нейросеть проверяет работу… обычно 10–30 секунд", ai_title: "Разбор от нейросети", ai_disclaimer: "Нейросеть может ошибаться. Если не согласны — напишите учителю.", hw_accepted: "Принято ✓", hw_needs_redo: "Нужно доработать", hw_previous_attempt: "Предыдущая попытка", hw_show_notes: "Показать пометки ({n})", hw_submit_fixed: "Отправить исправленную работу", hw_mostly_done_note: "Почти всё сделано 👍 Работу посмотрит учитель.", ai_submit_hint: "Работу сразу проверит нейросеть. Снимайте весь лист целиком, ровно, при хорошем свете, без бликов.", hw_redo_not_readable: "Фото не получилось разобрать. Переснимите ближе, при хорошем свете, весь лист целиком.", hw_redo_irrelevant: "Похоже, на фото не это задание. Проверьте и отправьте фото нужной работы.", hw_redo_not_done: "Задание не выполнено. Сделайте его и отправьте фото.", hw_redo_partial: "Выполнена только часть задания. Доделайте и отправьте ещё раз.", hw_redo_duplicate: "Это фото уже отправлялось раньше. Отправьте фото именно этой работы.", hw_redo_duplicate_other: "Такое фото уже отправлялось. Отправьте фото своей работы.", hw_redo_teacher_redo: "Учитель просит доработать:",
     homework_send: "Отправить", cancel: "Отмена", homework_sent: "Домашнее задание отправлено", avatar_updated: "Фото обновлено",
     important_notice: "Важное уведомление",
     your_balance: "Ваш баланс", shop_empty: "Магазин пока пуст", buy: "Купить", buy_confirm: "Точно купить?",
@@ -1614,6 +1665,7 @@ const TRANSLATIONS = {
     homework_submit: "Submit work", homework_submit_again: "Submit again",
     homework_pending: "Submitted — awaiting review", homework_reviewed: "Reviewed",
     homework_pick_photo: "Photo", homework_pick_file: "File", homework_note_placeholder: "Comment (optional)",
+    ai_checking: "The AI is checking your work… usually 10–30 seconds", ai_title: "AI review", ai_disclaimer: "The AI can make mistakes. If you disagree, message your teacher.", hw_accepted: "Accepted ✓", hw_needs_redo: "Needs more work", hw_previous_attempt: "Previous attempt", hw_show_notes: "Show notes ({n})", hw_submit_fixed: "Send the corrected work", hw_mostly_done_note: "Almost done 👍 Your teacher will take a look.", ai_submit_hint: "The AI will check your work right away. Photograph the whole page, straight, in good light, without glare.", hw_redo_not_readable: "We couldn't read the photo. Retake it closer, in good light, with the whole page.", hw_redo_irrelevant: "This doesn't look like this task. Check and send a photo of the right work.", hw_redo_not_done: "The task isn't done. Do it and send a photo.", hw_redo_partial: "Only part of the task is done. Finish it and send again.", hw_redo_duplicate: "This photo was already sent before. Please send a photo of this work.", hw_redo_duplicate_other: "This photo was already sent. Please send a photo of your own work.", hw_redo_teacher_redo: "Your teacher asks you to improve it:",
     homework_send: "Send", cancel: "Cancel", homework_sent: "Homework submitted", avatar_updated: "Photo updated",
     important_notice: "Important notice",
     your_balance: "Your balance", shop_empty: "Shop is empty for now", buy: "Buy", buy_confirm: "Confirm purchase?",
@@ -1698,6 +1750,7 @@ const TRANSLATIONS = {
     homework_submit: "Ishni topshirish", homework_submit_again: "Yana yuborish",
     homework_pending: "Yuborildi — tekshiruv kutilmoqda", homework_reviewed: "Tekshirildi",
     homework_pick_photo: "Foto", homework_pick_file: "Fayl", homework_note_placeholder: "Izoh (ixtiyoriy)",
+    ai_checking: "Sun'iy intellekt ishni tekshirmoqda… odatda 10–30 soniya", ai_title: "Sun'iy intellekt tahlili", ai_disclaimer: "Sun'iy intellekt xato qilishi mumkin. Rozi bo'lmasangiz — o'qituvchiga yozing.", hw_accepted: "Qabul qilindi ✓", hw_needs_redo: "Qayta ishlash kerak", hw_previous_attempt: "Oldingi urinish", hw_show_notes: "Belgilarni ko'rsatish ({n})", hw_submit_fixed: "Tuzatilgan ishni yuborish", hw_mostly_done_note: "Deyarli hammasi bajarilgan 👍 Ishni o'qituvchi ko'radi.", ai_submit_hint: "Ishni darhol sun'iy intellekt tekshiradi. Butun varaqni to'g'ri, yorug'da, yaltiramasdan suratga oling.", hw_redo_not_readable: "Rasmni o'qib bo'lmadi. Yaqinroq, yorug'da, butun varaqni qayta suratga oling.", hw_redo_irrelevant: "Rasmda bu vazifa emasga o'xshaydi. Tekshirib, kerakli ish rasmini yuboring.", hw_redo_not_done: "Vazifa bajarilmagan. Bajaring va rasmini yuboring.", hw_redo_partial: "Vazifaning faqat bir qismi bajarilgan. Tugatib, qayta yuboring.", hw_redo_duplicate: "Bu rasm avval yuborilgan. Aynan shu ish rasmini yuboring.", hw_redo_duplicate_other: "Bu rasm avval yuborilgan. O'z ishingiz rasmini yuboring.", hw_redo_teacher_redo: "O'qituvchi qayta ishlashni so'rayapti:",
     homework_send: "Yuborish", cancel: "Bekor qilish", homework_sent: "Uyga vazifa yuborildi", avatar_updated: "Rasm yangilandi",
     important_notice: "Muhim xabar",
     your_balance: "Balansingiz", shop_empty: "Do'kon hozircha bo'sh", buy: "Sotib olish", buy_confirm: "Rostdan sotib olasizmi?",
@@ -1962,6 +2015,15 @@ export default function ParentApp() {
     return () => { document.removeEventListener("visibilitychange", onVisible); clearInterval(interval); };
   }, [phase, initData, phone, password]);
 
+  // Пока нейросеть проверяет чью-то работу — обновляем данные чаще (раз в 5 секунд), чтобы разбор
+  // появился почти сразу. Как только проверок «в процессе» нет, возвращаемся к обычным 25 секундам.
+  const hasChecking = (students || []).some((st) => (st.homework || []).some((h) => h.aiStatus === "checking"));
+  useEffect(() => {
+    if (!hasChecking) return;
+    const fast = setInterval(() => silentRefresh(), 5000);
+    return () => clearInterval(fast);
+  }, [hasChecking, phase, initData, phone, password]);
+
   const handleLogin = async () => {
     if (!phone.trim() || !password.trim()) return;
     setLoginError("");
@@ -2012,7 +2074,7 @@ export default function ParentApp() {
       const files = [];
       for (const f of fileList || []) files.push(await fileToUploadPayload(f));
       const data = await submitHomeworkRequest(initData, phone.trim() || null, password.trim() || null, {
-        studentId: student.id, groupId, materialId, note, files,
+        studentId: student.id, groupId, materialId, note, files, lang,
       });
       if (data.error) { haptic("error"); setToast(data.error); setTimeout(() => setToast(""), 3500); return { ok: false }; }
       if (!data.linked) { haptic("error"); setToast(t("identity_error")); setTimeout(() => setToast(""), 4000); return { ok: false }; }
