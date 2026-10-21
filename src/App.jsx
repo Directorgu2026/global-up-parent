@@ -6,7 +6,7 @@ import {
   Award, Medal, TrendingUp, TrendingDown, Minus, LogOut, RefreshCw, Eye, EyeOff, Gift, GraduationCap, Phone, PiggyBank, Info, Users, X,
   Upload, Paperclip, Loader2, MessageCircle, Image as ImageIcon, ChevronDown as ChevronDownIcon, Camera, LifeBuoy,
   BookOpen, ClipboardList, Bell, Globe, AlertTriangle, Lock, Bot, Lightbulb, Pin, MessageSquare, Pencil, RotateCcw,
-  Sun, Moon, Star, Ban, DoorOpen, Hourglass, Search, Receipt, CreditCard, BarChart3, Dumbbell, ChevronRight,
+  Sun, Moon, Star, Ban, DoorOpen, Hourglass, Search, Receipt, CreditCard, BarChart3, Dumbbell, ChevronRight, ChevronLeft, Check,
 } from "lucide-react";
 
 /* ------------------------------ Настройка ------------------------------ */
@@ -78,7 +78,7 @@ const THEME_VARS = `
   }
   input, textarea, select { font-size: 16px !important; }
   .theme-light {
-    --paper: #F7F5F0; --ink: #1A1A17; --line: #EDEBE4; --surface: #FFFFFF;
+    --paper: #F5F4F0; --ink: #1C1B18; --ink-2: #6B6960; --ink-3: #A19F95; --line: #EFEDE7; --surface: #FFFFFF;
     --surface-soft: #F6F7FB; --surface-alt: #EEEEE8;
     --soft-red-bg: #FEE2E2; --soft-red-fg: #991B1B;
     --soft-yellow-bg: #FEF9C3; --soft-yellow-bg-2: #FFFBEB; --soft-yellow-border: #FEF3C7; --soft-yellow-fg: #854D0E;
@@ -88,7 +88,7 @@ const THEME_VARS = `
     --soft-orange-bg: #FFF7ED; --notice-border: #FDE68A;
   }
   .theme-dark {
-    --paper: #16171C; --ink: #EDECE6; --line: #2C2D33; --surface: #202127;
+    --paper: #16171C; --ink: #F1F0EA; --ink-2: #A9A8A0; --ink-3: #75746D; --line: #2C2D33; --surface: #202127;
     --surface-soft: #23242B; --surface-alt: #2A2B32;
     --soft-red-bg: #3D2020; --soft-red-fg: #FCA5A5;
     --soft-yellow-bg: #3A3018; --soft-yellow-bg-2: #322A16; --soft-yellow-border: #453A1C; --soft-yellow-fg: #F3D28A;
@@ -1235,8 +1235,177 @@ function SectionCard({ icon, iconBg, iconColor, title, right, children, id }) {
   );
 }
 
-function HomeTab({ student, notifications = [], t, lang, onSubmitHomework, onRequestService, onSubmitQuiz }) {
-  // Какое «повторение темы» сейчас открыто на весь экран (id сдачи ДЗ).
+// Строка-ссылка в минималистичных списках: иконка, заголовок, подпись, справа значок/стрелка.
+function ListRow({ icon, tile, color, title, sub, right, onClick, last }) {
+  return (
+    <button onClick={() => { haptic("light"); onClick && onClick(); }} className="w-full flex items-center gap-3 py-3 text-left active:opacity-70 transition-opacity" style={{ borderBottom: last ? "none" : "1px solid var(--line)" }}>
+      <IconTile icon={icon} bg={tile} color={color} size={38} iconSize={19} radius={12} />
+      <div className="min-w-0 flex-1">
+        <div className="text-[14.5px] font-bold leading-tight" style={{ color: "var(--ink)" }}>{title}</div>
+        {sub && <div className="text-[12px] mt-0.5 truncate" style={{ color: "var(--ink-2)" }}>{sub}</div>}
+      </div>
+      {right}
+      <ChevronRight size={17} style={{ color: "var(--ink-3)" }} className="shrink-0" />
+    </button>
+  );
+}
+function Chip({ children, tone = "neutral" }) {
+  const c = {
+    neutral: ["var(--surface-alt)", "var(--ink-2)"], red: ["var(--soft-red-bg)", "var(--soft-red-fg)"], green: ["var(--soft-green-bg)", "var(--soft-green-fg)"],
+    blue: ["var(--soft-blue-bg)", "var(--soft-blue-fg)"], purple: ["var(--soft-purple-bg)", "var(--soft-purple-fg)"], yellow: ["var(--soft-yellow-bg)", "var(--soft-yellow-fg)"],
+  }[tone];
+  return <span className="text-[11.5px] font-bold px-2.5 py-1 rounded-full shrink-0 inline-flex items-center gap-1" style={{ background: c[0], color: c[1] }}>{children}</span>;
+}
+function PlainCard({ children, className = "", style = {}, id }) {
+  return <div id={id} className={`rounded-[24px] px-4 ${className}`} style={{ background: "var(--surface)", boxShadow: "0 4px 16px rgba(26,26,23,0.06)", ...style }}>{children}</div>;
+}
+function CardTitle({ children, right }) {
+  return (
+    <div className="flex items-center justify-between pt-4 pb-1">
+      <h3 className="text-[12px] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--ink-3)" }}>{children}</h3>
+      {right}
+    </div>
+  );
+}
+
+// ------------------------------- Главная (минималистичная) -------------------------------
+// На главной — только самое нужное: деньги, ближайший урок, срочное, «Учёба» (ДЗ и прогресс — открываются
+// отдельным экраном) и «Сервис». Всё подробное (задания, посещаемость, группы, объявления) — на своих экранах.
+function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpenScreen }) {
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  const [showCoinsInfo, setShowCoinsInfo] = useState(false);
+  const [showDebt, setShowDebt] = useState(false);
+  const [serviceModalType, setServiceModalType] = useState(null);
+  const hasDebt = (student.debt || 0) > 0;
+  const currency = lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS";
+  const urgent = notifications.filter((n) => n.urgent);
+  const normal = notifications.filter((n) => !n.urgent);
+  const lessons = upcomingLessons(student.groups);
+  const admissionOf = (gid) => (student.admission || []).find((a) => a.groupId === gid);
+  const tasks = computeHomeworkTasks(student);
+  const actionable = tasks.filter((x) => x.kind !== "checking" && x.kind !== "preparing");
+  const inProgress = tasks.length - actionable.length;
+  const blocked = (student.admission || []).filter((a) => a.blocked);
+  const warned = (student.admission || []).filter((a) => !a.blocked && a.mode !== "off" && a.streak >= Math.max(1, a.limit - 1));
+  const log = student.attendanceLog || [];
+  const attPct = log.length ? Math.round((log.filter((r) => r.present).length / log.length) * 100) : null;
+  const grades = [...log.filter((r) => r.grade).map((r) => r.grade), ...(student.generalGrades || []).map((g) => g.value)];
+  const avg = grades.length ? (grades.reduce((a, b) => a + b, 0) / grades.length).toFixed(1) : null;
+  const hwSub = actionable.length
+    ? t("hw_row_sub_todo", { what: actionable.slice(0, 2).map((x) => x.kind === "quiz" ? t("hw_task_quiz_title") : (x.m.text || t("homework"))).join(", ") })
+    : inProgress ? t("hw_task_checking_sub") : (student.materials || []).length ? t("hw_all_closed_title") : t("no_homework");
+  const progSub = [attPct != null && t("prog_row_att", { n: attPct }), avg && t("prog_row_avg", { n: avg })].filter(Boolean).join(" · ") || t("progress_none");
+  const glass = { background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(8px)" };
+
+  return (
+    <div className="space-y-3">
+      {/* Деньги — одна строка на шапке */}
+      <div className="grid grid-cols-2 gap-2.5">
+        <button onClick={() => (hasDebt ? setShowDebt(true) : null)} className="rounded-[18px] px-3 py-2.5 flex items-center gap-2.5 text-left text-white active:scale-[0.98] transition-transform" style={glass}>
+          <Wallet size={18} className="shrink-0" style={{ opacity: 0.9 }} />
+          <div className="min-w-0">
+            <div className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.72)" }}>{hasDebt ? t("debt") : t("balance")}</div>
+            <div className="text-[16px] font-extrabold leading-tight truncate">{fmt(hasDebt ? student.debt : (student.prepaidCredit || 0))} <span className="text-[11px] font-semibold" style={{ color: "rgba(255,255,255,0.72)" }}>{currency}</span></div>
+          </div>
+        </button>
+        <button onClick={() => setShowCoinsInfo(true)} className="rounded-[18px] px-3 py-2.5 flex items-center gap-2.5 text-left text-white active:scale-[0.98] transition-transform" style={glass}>
+          <CoinsIcon size={18} className="shrink-0" style={{ opacity: 0.9 }} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.72)" }}>GlobalCoins</div>
+            <div className="text-[16px] font-extrabold leading-tight">{student.coins} <span className="text-[11px] font-semibold" style={{ color: "rgba(255,255,255,0.72)" }}>GC</span></div>
+          </div>
+          <Info size={15} className="shrink-0" style={{ opacity: 0.75 }} />
+        </button>
+      </div>
+
+      {/* Ближайший урок */}
+      <PlainCard className="py-3.5" style={{ boxShadow: "0 10px 30px rgba(26,26,23,0.12)" }}>
+        {(student.groups || []).length === 0 || lessons.length === 0 ? (
+          <div className="flex items-center gap-3"><IconTile icon={Calendar} bg="var(--surface-alt)" color="var(--ink-2)" /><p className="text-[13.5px]" style={{ color: "var(--ink-2)" }}>{(student.groups || []).length === 0 ? t("no_group") : t("no_schedule")}</p></div>
+        ) : (
+          <div className="space-y-3">
+            {lessons.map(({ group: g, date, isToday }) => {
+              const adm = admissionOf(g.id);
+              const isBlocked = !!adm?.blocked;
+              return (
+                <div key={g.id} className="flex items-center gap-3.5">
+                  <div className="w-[60px] h-[60px] rounded-[18px] flex flex-col items-center justify-center shrink-0" style={{ background: isBlocked ? "var(--soft-red-bg)" : "var(--soft-blue-bg)", color: isBlocked ? "var(--soft-red-fg)" : "var(--soft-blue-fg)" }}>
+                    <div className="text-[17px] font-black leading-none">{g.start}</div>
+                    <div className="text-[9.5px] font-bold uppercase mt-1">{isToday ? t("today_short") : date.toLocaleDateString(locale, { weekday: "short" })}</div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink-3)" }}>{t("next_lesson_label")}</div>
+                    <div className="text-[16px] font-extrabold leading-tight truncate" style={{ color: "var(--ink)" }}>{g.name}</div>
+                    <div className="text-[12px] mt-0.5 truncate" style={{ color: "var(--ink-2)" }}>{[g.room && `${t("room_short")} ${g.room}`, g.teacherName].filter(Boolean).join(" · ")}</div>
+                  </div>
+                  {adm && adm.mode !== "off" && (isBlocked ? <Chip tone="red"><Ban size={12} />{t("adm_chip_no")}</Chip> : <Chip tone="green"><Check size={12} />{t("adm_chip_yes")}</Chip>)}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </PlainCard>
+
+      {/* Срочное — коротко, по нажатию открывается подробно */}
+      {(blocked.length > 0 || warned.length > 0 || urgent.length > 0) && (
+        <div className="space-y-2">
+          {blocked.map((a) => (
+            <button key={"b" + a.groupId} onClick={() => onOpenScreen("homework")} className="w-full rounded-[18px] px-3.5 py-3 flex items-center gap-3 text-left" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>
+              <Ban size={18} className="shrink-0" />
+              <div className="min-w-0 flex-1"><div className="text-[13.5px] font-bold">{t("adm_home_blocked")}</div><div className="text-[11.5px] opacity-80">{t("adm_home_blocked_sub", { n: a.streak })}</div></div>
+              <ChevronRight size={16} className="shrink-0 opacity-70" />
+            </button>
+          ))}
+          {warned.map((a) => (
+            <button key={"w" + a.groupId} onClick={() => onOpenScreen("homework")} className="w-full rounded-[18px] px-3.5 py-3 flex items-center gap-3 text-left" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}>
+              <AlertTriangle size={18} className="shrink-0" />
+              <div className="min-w-0 flex-1"><div className="text-[13.5px] font-bold">{a.overridden && a.streak >= a.limit ? t("adm_home_override") : t("adm_home_warn", { n: a.streak })}</div><div className="text-[11.5px] opacity-80">{t("adm_home_warn_sub")}</div></div>
+              <ChevronRight size={16} className="shrink-0 opacity-70" />
+            </button>
+          ))}
+          {urgent.slice(0, 1).map((n) => (
+            <button key={n.id} onClick={() => onOpenScreen("notices")} className="w-full rounded-[18px] px-3.5 py-3 flex items-center gap-3 text-left text-white" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
+              <Megaphone size={18} className="shrink-0" />
+              <div className="min-w-0 flex-1"><div className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.75)" }}>{t("important_notice")}</div><div className="text-[13.5px] font-semibold leading-snug line-clamp-2">{n.text}</div></div>
+              <ChevronRight size={16} className="shrink-0 opacity-80" />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Учёба: ДЗ и прогресс — каждый открывается своим экраном */}
+      <PlainCard>
+        <CardTitle>{t("study_title")}</CardTitle>
+        <ListRow icon={BookOpen} tile="var(--soft-purple-bg)" color={PURPLE} title={t("homework")} sub={hwSub} onClick={() => onOpenScreen("homework")}
+          right={actionable.length > 0 ? <Chip tone="red">{actionable.length}</Chip> : inProgress > 0 ? <Loader2 size={15} className="animate-spin shrink-0" style={{ color: BLUE }} /> : (student.materials || []).length ? <CheckCircle2 size={17} className="shrink-0" style={{ color: GREEN_D }} /> : null} />
+        <ListRow icon={TrendingUp} tile="var(--soft-green-bg)" color={GREEN_D} title={t("progress_title")} sub={progSub} onClick={() => onOpenScreen("progress")} />
+        <ListRow icon={Bell} tile="var(--soft-yellow-bg)" color="#B45309" title={t("notices_title")} sub={notifications.length ? notifications[0].text : t("notices_none")} onClick={() => onOpenScreen("notices")} last
+          right={normal.length + urgent.length > 0 ? <Chip tone="yellow">{normal.length + urgent.length}</Chip> : null} />
+      </PlainCard>
+
+      {/* Сервис */}
+      <PlainCard>
+        <CardTitle>{t("service_section_title")}</CardTitle>
+        {[
+          { type: "support_lesson", icon: LifeBuoy, tile: "var(--soft-red-bg)", color: RED_D },
+          { type: "topic_reexplain", icon: RefreshCw, tile: "var(--soft-blue-bg)", color: BLUE },
+          { type: "materials_only", icon: Paperclip, tile: "var(--soft-green-bg)", color: GREEN_D },
+        ].map((s, i, arr) => (
+          <ListRow key={s.type} icon={s.icon} tile={s.tile} color={s.color} title={t(`service_${s.type}_title`)} sub={t(`service_${s.type}_sub`)} onClick={() => setServiceModalType(s.type)} last={i === arr.length - 1} />
+        ))}
+      </PlainCard>
+
+      {serviceModalType && (
+        <ServiceRequestModal type={serviceModalType} student={student} onClose={() => setServiceModalType(null)} onSubmit={(groupId, topic) => onRequestService(serviceModalType, groupId, topic)} t={t} />
+      )}
+      {showCoinsInfo && <CoinsInfoPopup onClose={() => setShowCoinsInfo(false)} t={t} />}
+      {showDebt && <DebtPopup amount={student.debt} adminTelegram={student.adminTelegram} lang={lang} onClose={() => setShowDebt(false)} t={t} />}
+    </div>
+  );
+}
+
+// ------------------------------- Экран «Домашнее задание» -------------------------------
+function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
   // Открытый тест запоминаем: если ученик вышел из приложения посреди теста, при входе он откроется снова.
   const openKey = `gu_open_lesson_${student.id}`;
   const restoredRef = useRef(false); // true — тест открыт автоматически при входе, а не нажатием
@@ -1249,302 +1418,164 @@ function HomeTab({ student, notifications = [], t, lang, onSubmitHomework, onReq
     return () => { cancelled = true; };
   }, [openKey]);
   const lessonSub0 = lessonSubId ? (student.homework || []).find((h) => h.id === lessonSubId) : null;
-  // При входе заново открываем только НЕзавершённый тест (сданный или без попыток — не навязываем).
-  // Решаем один раз — в момент восстановления. Если тест сдают прямо сейчас, окно с результатом не закрываем.
+  // При входе заново открываем только НЕзавершённый тест. Решаем один раз — в момент восстановления.
   const restoredButFinished = restoredRef.current && lessonSub0 && (() => { const x = lessonState(lessonSub0); return !x || x.done || x.outOfAttempts; })();
   if (restoredRef.current && lessonSub0 && !restoredButFinished) restoredRef.current = false;
   const lessonSub = lessonSub0 && lessonSub0.aiLesson && !restoredButFinished ? lessonSub0 : null;
   useEffect(() => { if (restoredButFinished) setLessonSubId(null); }, [restoredButFinished]);
-  const locale = LOCALE_OF[lang] || "ru-RU";
-  const [showCoinsInfo, setShowCoinsInfo] = useState(false);
-  const [showDebt, setShowDebt] = useState(false);
-  const [showOldHomework, setShowOldHomework] = useState(false);
-  const [showAllAttendance, setShowAllAttendance] = useState(false);
-  const [serviceModalType, setServiceModalType] = useState(null);
-  const [openMaterialId, setOpenMaterialId] = useState(null); // какое ДЗ раскрыть для сдачи по кнопке «Сдать»
-  const log = [...(student.attendanceLog || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
-  const total = log.length;
-  const present = log.filter((r) => r.present).length;
-  const pct = total ? Math.round((present / total) * 100) : null;
-  const recent = log.slice(0, showAllAttendance ? 30 : 8);
-  const materials = [...(student.materials || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
-  const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
-  const hasDebt = (student.debt || 0) > 0;
-  const currency = lang === "ru" ? "сум" : lang === "uz" ? "so'm" : "UZS";
-  const urgentNotifications = notifications.filter((n) => n.urgent);
-  const normalNotifications = notifications.filter((n) => !n.urgent);
-  const lessons = upcomingLessons(student.groups);
-  const admissionOf = (gid) => (student.admission || []).find((a) => a.groupId === gid);
-  const tasks = computeHomeworkTasks(student);
-  const actionable = tasks.filter((x) => x.kind !== "checking" && x.kind !== "preparing");
 
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  const [showOld, setShowOld] = useState(false);
+  const [openMaterialId, setOpenMaterialId] = useState(null);
+  const materials = [...(student.materials || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const tasks = computeHomeworkTasks(student);
   const openTask = (task) => {
     haptic("light");
     if (task.kind === "quiz") { setLessonSubId(task.h.id); return; }
-    if (materials[0] && materials[0].id !== task.m.id) setShowOldHomework(true);
+    if (materials[0] && materials[0].id !== task.m.id) setShowOld(true);
     setOpenMaterialId(task.m.id);
   };
-
+  const [latest, ...older] = materials;
+  const renderItem = (m) => (
+    <PlainCard key={m.id} className="py-3.5">
+      <div className="text-[11.5px] font-semibold flex items-center gap-1.5" style={{ color: "var(--ink-3)" }}><Calendar size={12} />{new Date(m.date).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "long" })}</div>
+      {m.text && <div className="text-[14.5px] font-semibold mt-1 leading-snug" style={{ color: "var(--ink)" }}>{m.text}</div>}
+      {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-semibold inline-flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} />{t("open_material")}</a>}
+      <HomeworkSubmitBox material={m} student={student} onSubmitHomework={onSubmitHomework} onOpenLesson={(h) => setLessonSubId(h.id)} autoOpen={openMaterialId === m.id} onAutoOpened={() => setOpenMaterialId(null)} t={t} locale={locale} />
+    </PlainCard>
+  );
   return (
     <div className="space-y-3">
-      {/* Деньги — на красной шапке, «стеклянными» плашками */}
-      <div className="grid grid-cols-2 gap-2.5">
-        <button onClick={() => hasDebt && setShowDebt(true)} className="rounded-[20px] p-3 flex items-center gap-2.5 text-left text-white active:scale-[0.98] transition-transform" style={{ background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(8px)" }}>
-          <IconTile icon={Wallet} bg="#fff" color={hasDebt ? RED_D : GREEN_D} size={36} iconSize={18} radius={12} />
-          <div className="min-w-0">
-            <div className="text-[10.5px] font-bold uppercase tracking-wide opacity-85">{hasDebt ? t("debt") : t("balance")}</div>
-            <div className="text-[18px] font-black leading-tight truncate">{fmt(hasDebt ? student.debt : (student.prepaidCredit || 0))}<span className="text-[11px] font-semibold opacity-85 ml-1">{currency}</span></div>
-            <div className="text-[10.5px] opacity-85 truncate">{hasDebt ? t("debt_tap_hint") : (student.prepaidCredit || 0) > 0 ? t("debt_credit_note") : t("debt_none")}</div>
-          </div>
-        </button>
-        <button onClick={() => setShowCoinsInfo(true)} className="rounded-[20px] p-3 flex items-center gap-2.5 text-left text-white active:scale-[0.98] transition-transform relative" style={{ background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(8px)" }}>
-          <IconTile icon={CoinsIcon} bg="#fff" color="#C2410C" size={36} iconSize={18} radius={12} />
-          <div className="min-w-0">
-            <div className="text-[10.5px] font-bold uppercase tracking-wide opacity-85">{t("coins")}</div>
-            <div className="text-[18px] font-black leading-tight">{student.coins}<span className="text-[11px] font-semibold opacity-85 ml-1">GC</span></div>
-            <div className="text-[10.5px] opacity-85">{t("coins_how")}</div>
-          </div>
-          <span className="anim-info-pulse absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "#fff" }}><Info size={12} strokeWidth={2.6} style={{ color: "#B45309" }} /></span>
-        </button>
-      </div>
-      {hasDebt && (student.prepaidCredit || 0) > 0 && (
-        <div className="text-[11.5px] font-semibold text-white flex items-center gap-1.5 px-1"><PiggyBank size={13} />{t("credit_note", { sum: fmt(student.prepaidCredit) })}</div>
-      )}
-
-      {/* Ближайший урок — белая карточка, наполовину заходит на шапку */}
-      <div className="rounded-[26px] p-4" style={{ background: "var(--surface)", boxShadow: "0 10px 30px rgba(26,26,23,0.12)" }}>
-        {(student.groups || []).length === 0 ? (
-          <div className="flex items-center gap-3"><IconTile icon={Calendar} bg="var(--surface-alt)" color="var(--ink)" /><p className="text-[13.5px] opacity-60">{t("no_group")}</p></div>
-        ) : lessons.length === 0 ? (
-          <div className="flex items-center gap-3"><IconTile icon={Calendar} bg="var(--surface-alt)" color="var(--ink)" /><p className="text-[13.5px] opacity-60">{t("no_schedule")}</p></div>
-        ) : (
-          <div className="space-y-3">
-            {lessons.map(({ group: g, date, isToday }) => {
-              const adm = admissionOf(g.id);
-              const blocked = !!adm?.blocked;
-              const showAdm = adm && adm.mode !== "off";
-              return (
-                <div key={g.id} className="flex items-center gap-3.5">
-                  <div className="w-[68px] h-[68px] rounded-[20px] flex flex-col items-center justify-center text-white shrink-0" style={{ background: blocked ? `linear-gradient(135deg, ${RED}, ${RED_D})` : `linear-gradient(135deg, ${BLUE}, #1E40AF)`, boxShadow: blocked ? "0 6px 16px rgba(220,38,38,0.35)" : "0 6px 16px rgba(37,99,235,0.35)" }}>
-                    <div className="text-[19px] font-black leading-none">{g.start}</div>
-                    <div className="text-[9.5px] font-bold uppercase mt-1 opacity-90">{isToday ? t("today_short") : date.toLocaleDateString(locale, { weekday: "short" })}</div>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[11px] font-extrabold uppercase tracking-wide" style={{ color: blocked ? RED : BLUE }}>{blocked ? t("adm_no_access_short") : isToday ? t("today_lesson_label") : t("next_lesson_label")}</div>
-                    <div className="text-[17px] font-black leading-tight truncate mt-0.5">{g.name}</div>
-                    <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                      {g.room && <span className="text-[11.5px] font-semibold px-2 py-0.5 rounded-lg flex items-center gap-1" style={{ background: "var(--surface-alt)" }}><DoorOpen size={12} />{g.room}</span>}
-                      {g.teacherName && <span className="text-[11.5px] font-semibold px-2 py-0.5 rounded-lg flex items-center gap-1" style={{ background: "var(--surface-alt)" }}><User size={12} />{g.teacherName}</span>}
-                      {showAdm && (blocked
-                        ? <span className="text-[11.5px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}><Ban size={12} />{t("adm_chip_no")}</span>
-                        : <span className="text-[11.5px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1" style={{ background: "var(--soft-green-bg)", color: "var(--soft-green-fg)" }}><CheckCircle2 size={12} />{t("adm_chip_yes")}</span>)}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
       <AdmissionBanner student={student} t={t} locale={locale} />
-
-      {/* Объявления: срочные — красные, обычные — жёлтые */}
-      <div id="gu-notices" className="space-y-3" style={{ display: notifications.length ? "block" : "none" }}>
-        {urgentNotifications.map((n) => (
-          <div key={n.id} className="rounded-[26px] p-4 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})`, boxShadow: "0 6px 20px rgba(220,38,38,0.3)" }}>
-            <div className="flex items-start gap-3">
-              <IconTile icon={Megaphone} bg="rgba(255,255,255,0.2)" color="#fff" size={36} iconSize={18} radius={12} />
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold uppercase tracking-wide opacity-90">{t("important_notice")}</p>
-                <p className="text-[14.5px] font-semibold leading-snug mt-1">{n.text}</p>
-                <p className="text-[11px] opacity-75 mt-1.5">{n.senderName} · {ruDate(n.date, locale)}</p>
+      {tasks.length > 0 ? (
+        <PlainCard>
+          <CardTitle right={<Chip tone="red">{tasks.filter((x) => x.kind !== "checking" && x.kind !== "preparing").length}</Chip>}>{t("hw_todo_now")}</CardTitle>
+          {tasks.map((task, i) => {
+            const meta = {
+              submit: { icon: Camera, tile: "var(--soft-red-bg)", color: RED, btn: t("hw_btn_submit"), sub: t("hw_task_submit_sub") },
+              redo: { icon: RotateCcw, tile: "var(--soft-orange-bg)", color: BRICK, btn: t("hw_btn_redo"), sub: t("hw_task_redo_sub") },
+              quiz: { icon: ClipboardList, tile: "var(--soft-purple-bg)", color: PURPLE, btn: t("hw_btn_quiz"), sub: t("hw_task_quiz_sub") },
+              checking: { icon: Bot, tile: "var(--soft-blue-bg)", color: BLUE, btn: null, sub: t("hw_task_checking_sub") },
+              preparing: { icon: Hourglass, tile: "var(--soft-blue-bg)", color: BLUE, btn: null, sub: t("hw_task_preparing_sub") },
+            }[task.kind];
+            const title = task.kind === "quiz" && task.h?.aiLesson ? `${t("hw_task_quiz_title")}: ${task.h.aiLesson.topics.map((x) => x.topic).join(", ")}` : (task.m.text || t("homework"));
+            return (
+              <div key={task.kind + task.m.id} className="flex items-center gap-3 py-3" style={{ borderBottom: i === tasks.length - 1 ? "none" : "1px solid var(--line)" }}>
+                <IconTile icon={meta.icon} bg={meta.tile} color={meta.color} size={38} iconSize={18} radius={12} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[14px] font-bold truncate" style={{ color: "var(--ink)" }}>{title}</div>
+                  <div className="text-[12px] truncate" style={{ color: "var(--ink-2)" }}>{new Date(task.m.date).toLocaleDateString(locale, { day: "numeric", month: "short" })} · {meta.sub}</div>
+                </div>
+                {meta.btn ? <button onClick={() => openTask(task)} className="text-[12.5px] font-bold text-white px-3.5 py-2 rounded-xl shrink-0 active:scale-95 transition-transform" style={{ background: meta.color }}>{meta.btn}</button> : <Loader2 size={17} className="animate-spin shrink-0" style={{ color: BLUE }} />}
               </div>
-            </div>
-          </div>
-        ))}
-        {normalNotifications.length > 0 && (
-          <SectionCard icon={Bell} iconBg="var(--soft-yellow-bg)" iconColor="#B45309" title={t("notices_title")}>
-            <div className="space-y-2.5">
-              {normalNotifications.map((n) => (
-                <div key={n.id} className="p-3 rounded-2xl" style={{ background: "var(--soft-yellow-bg-2)" }}>
-                  <p className="text-[13px] font-medium leading-snug">{n.text}</p>
-                  <p className="text-[10.5px] opacity-55 mt-1">{n.senderName} · {ruDate(n.date, locale)}</p>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        )}
-      </div>
+            );
+          })}
+        </PlainCard>
+      ) : materials.length > 0 && (
+        <PlainCard className="py-3.5 flex items-center gap-3">
+          <IconTile icon={Trophy} bg="var(--soft-green-bg)" color={GREEN_D} />
+          <div><div className="text-[14px] font-bold" style={{ color: "var(--ink)" }}>{t("hw_all_closed_title")}</div><div className="text-[12px]" style={{ color: "var(--ink-2)" }}>{t("hw_all_closed_sub")}</div></div>
+        </PlainCard>
+      )}
+      {lessonSub && lessonSub.aiLesson && <TopicReviewSheet key={lessonSub.id} h={lessonSub} t={t} onClose={() => setLessonSubId(null)} onSubmitQuiz={onSubmitQuiz} />}
+      {materials.length === 0 ? (
+        <PlainCard><EmptyState text={t("no_homework")} icon={PartyPopper} /></PlainCard>
+      ) : (
+        <>
+          <div className="text-[12px] font-bold uppercase tracking-[0.06em] px-1 pt-2" style={{ color: "var(--ink-3)" }}>{t("hw_all_tasks")}</div>
+          {renderItem(latest)}
+          {older.length > 0 && (
+            <>
+              <button onClick={() => setShowOld((v) => !v)} className="w-full text-[12.5px] font-semibold py-2 flex items-center justify-center gap-1.5" style={{ color: "var(--ink-2)" }}>
+                {showOld ? t("homework_hide_old") : t("homework_show_old", { n: older.length })}
+                <ChevronDownIcon size={14} style={{ transform: showOld ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+              </button>
+              {showOld && older.map(renderItem)}
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
-      {/* Домашнее задание: сначала — что сделать сейчас, ниже — все задания с отправкой и разбором */}
-      <SectionCard
-        icon={BookOpen} iconBg="var(--soft-purple-bg)" iconColor={PURPLE} title={t("homework")}
-        right={actionable.length > 0
-          ? <span className="text-[11.5px] font-extrabold px-2.5 py-1 rounded-full" style={{ background: "var(--soft-purple-bg)", color: "var(--soft-purple-fg)" }}>{t("hw_tasks_count", { n: actionable.length })}</span>
-          : materials.length > 0 ? <span className="text-[11.5px] font-extrabold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ background: "var(--soft-green-bg)", color: "var(--soft-green-fg)" }}><CheckCircle2 size={12} />{t("hw_all_closed_short")}</span> : null}
-      >
-        {tasks.length > 0 && (
-          <div className="space-y-2 mb-3">
-            {tasks.slice(0, 4).map((task) => {
-              const meta = {
-                submit: { icon: Camera, tile: RED, bg: "var(--soft-red-bg)", btn: t("hw_btn_submit"), sub: t("hw_task_submit_sub") },
-                redo: { icon: RotateCcw, tile: BRICK, bg: "var(--soft-orange-bg)", btn: t("hw_btn_redo"), sub: t("hw_task_redo_sub") },
-                quiz: { icon: ClipboardList, tile: PURPLE, bg: "var(--soft-purple-bg)", btn: t("hw_btn_quiz"), sub: t("hw_task_quiz_sub") },
-                checking: { icon: Bot, tile: BLUE, bg: "var(--soft-blue-bg)", btn: null, sub: t("hw_task_checking_sub") },
-                preparing: { icon: Hourglass, tile: BLUE, bg: "var(--soft-blue-bg)", btn: null, sub: t("hw_task_preparing_sub") },
-              }[task.kind];
-              const title = task.kind === "quiz" && task.h?.aiLesson ? `${t("hw_task_quiz_title")}: ${task.h.aiLesson.topics.map((x) => x.topic).join(", ")}` : (task.m.text || t("homework"));
-              return (
-                <button key={task.kind + task.m.id} onClick={() => meta.btn && openTask(task)} className="w-full p-2.5 rounded-[18px] flex items-center gap-3 text-left active:scale-[0.99] transition-transform" style={{ background: meta.bg }}>
-                  <IconTile icon={meta.icon} bg={meta.tile} color="#fff" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13.5px] font-bold truncate">{title}</div>
-                    <div className="text-[11.5px] opacity-60 truncate">{new Date(task.m.date).toLocaleDateString(locale, { day: "numeric", month: "short" })} · {meta.sub}</div>
-                  </div>
-                  {meta.btn ? <span className="text-[12.5px] font-black text-white px-3 py-2 rounded-xl shrink-0" style={{ background: meta.tile }}>{meta.btn}</span> : <Loader2 size={17} className="animate-spin shrink-0" style={{ color: BLUE }} />}
-                </button>
-              );
-            })}
-            {tasks.length > 4 && <p className="text-[11.5px] opacity-55 text-center">{t("hw_more_tasks", { n: tasks.length - 4 })}</p>}
-          </div>
-        )}
-        {tasks.length === 0 && materials.length > 0 && (
-          <div className="mb-3 p-3 rounded-[18px] flex items-center gap-3" style={{ background: "var(--soft-green-bg)" }}>
-            <IconTile icon={Trophy} bg={GREEN_D} color="#fff" />
-            <div><div className="text-[13.5px] font-extrabold" style={{ color: "var(--soft-green-fg)" }}>{t("hw_all_closed_title")}</div><div className="text-[11.5px] opacity-70">{t("hw_all_closed_sub")}</div></div>
-          </div>
-        )}
-        {lessonSub && lessonSub.aiLesson && <TopicReviewSheet key={lessonSub.id} h={lessonSub} t={t} onClose={() => setLessonSubId(null)} onSubmitQuiz={onSubmitQuiz} />}
-        {materials.length === 0 ? (
-          <EmptyState text={t("no_homework")} icon={PartyPopper} />
-        ) : (
-          <div className="space-y-2">
-            {(() => {
-              const [latest, ...older] = materials;
-              const renderItem = (m) => (
-                <div key={m.id} className="p-3 rounded-2xl" style={{ background: "var(--soft-yellow-bg-2)", border: "1px solid var(--soft-yellow-border)" }}>
-                  <div className="text-[11px] font-bold uppercase tracking-wide flex items-center gap-1" style={{ color: "#B45309" }}><Calendar size={12} />{new Date(m.date).toLocaleDateString(locale, { day: "2-digit", month: "long" })}</div>
-                  {m.text && <div className="text-[13px] mt-1 leading-snug">{m.text}</div>}
-                  {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-medium flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} className="inline mr-1 -mt-0.5" />{t("open_material")}</a>}
-                  <HomeworkSubmitBox material={m} student={student} onSubmitHomework={onSubmitHomework} onOpenLesson={(h) => setLessonSubId(h.id)} autoOpen={openMaterialId === m.id} onAutoOpened={() => setOpenMaterialId(null)} t={t} locale={locale} />
-                </div>
-              );
-              return (
-                <>
-                  {renderItem(latest)}
-                  {older.length > 0 && (
-                    <>
-                      <button onClick={() => setShowOldHomework((v) => !v)} className="w-full text-[12px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 opacity-60">
-                        {showOldHomework ? t("homework_hide_old") : t("homework_show_old", { n: older.length })}
-                        <ChevronDownIcon size={14} style={{ transform: showOldHomework ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
-                      </button>
-                      {showOldHomework && older.map(renderItem)}
-                    </>
-                  )}
-                </>
-              );
-            })()}
-          </div>
-        )}
-      </SectionCard>
-
+// ------------------------------- Экран «Мой прогресс» -------------------------------
+function ProgressScreen({ student, t, lang }) {
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  const [showAll, setShowAll] = useState(false);
+  const log = [...(student.attendanceLog || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const pct = log.length ? Math.round((log.filter((r) => r.present).length / log.length) * 100) : null;
+  const recent = log.slice(0, showAll ? 30 : 8);
+  const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
+  return (
+    <div className="space-y-3">
       <ProgressCard log={log} generalGrades={student.generalGrades || []} materials={student.materials || []} homework={student.homework || []} coins={student.coins} t={t} />
-
-      {/* Сервис — заявки учителю: суппорт-урок, повторное объяснение темы, только материалы */}
-      <SectionCard icon={LifeBuoy} iconBg="var(--soft-red-bg)" iconColor={RED_D} title={t("service_section_title")}>
-        <p className="text-[12px] opacity-55 -mt-1.5 mb-3">{t("service_section_hint")}</p>
-        <div className="grid grid-cols-3 gap-2.5">
-          {[
-            { type: "support_lesson", icon: LifeBuoy, bg: "var(--soft-red-bg)", tile: RED, fg: "var(--soft-red-fg)" },
-            { type: "topic_reexplain", icon: RefreshCw, bg: "var(--soft-blue-bg)", tile: BLUE, fg: "var(--soft-blue-fg)" },
-            { type: "materials_only", icon: Paperclip, bg: "var(--soft-green-bg)", tile: GREEN_D, fg: "var(--soft-green-fg)" },
-          ].map((s) => (
-            <button key={s.type} onClick={() => { haptic("light"); setServiceModalType(s.type); }} className="flex flex-col items-center justify-center gap-2 p-3 rounded-[20px] text-center active:scale-95 transition-transform" style={{ background: s.bg, minHeight: 108 }}>
-              <IconTile icon={s.icon} bg={s.tile} color="#fff" size={40} iconSize={20} radius={14} />
-              <span className="text-[11.5px] font-bold leading-tight" style={{ color: s.fg }}>{t(`service_${s.type}_title`)}</span>
-            </button>
-          ))}
-        </div>
-      </SectionCard>
-      {serviceModalType && (
-        <ServiceRequestModal
-          type={serviceModalType}
-          student={student}
-          onClose={() => setServiceModalType(null)}
-          onSubmit={(groupId, topic) => onRequestService(serviceModalType, groupId, topic)}
-          t={t}
-        />
-      )}
-
-      {/* Мои группы — предмет, расписание, кабинет, учитель */}
-      {(student.groups || []).length > 0 && (
-        <SectionCard icon={GraduationCap} iconBg="var(--soft-blue-bg)" iconColor="var(--soft-blue-fg)" title={t("my_groups_title")}>
-          <div className="space-y-2">
-            {student.groups.map((g) => {
-              const [c1, c2] = courseColor(g.course);
-              return (
-                <div key={g.id} className="p-3 rounded-2xl flex items-start gap-3" style={{ background: "var(--surface-soft)" }}>
-                  <div className="w-1.5 self-stretch rounded-full" style={{ background: `linear-gradient(180deg, ${c1}, ${c2})` }} />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: c1 }}>{g.course}</p>
-                    <p className="text-[14.5px] font-extrabold">{g.name}</p>
-                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap text-[11.5px]">
-                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg" style={{ background: "var(--surface)" }}><Calendar size={11} />{scheduleText(g, t("no_schedule"))}</span>
-                      {g.room && <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg" style={{ background: "var(--surface)" }}><MapPin size={11} />{g.room}</span>}
-                      {g.teacherName && <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg" style={{ background: "var(--surface)" }}><User size={11} />{g.teacherName}</span>}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </SectionCard>
-      )}
-
-      {/* Посещаемость и оценки */}
-      <SectionCard
-        icon={BarChart3} iconBg="var(--soft-green-bg)" iconColor={GREEN_D} title={t("attendance_grades")}
-        right={pct !== null && (
-          <span className="text-[12.5px] font-extrabold px-2.5 py-1 rounded-full" style={{ background: pct >= 90 ? "var(--soft-green-bg)" : pct >= 80 ? "var(--soft-yellow-bg)" : RED_L, color: pct >= 90 ? GREEN_D : pct >= 80 ? "var(--soft-yellow-fg)" : RED_D }}>{pct}%</span>
-        )}
-      >
-        {recent.length === 0 ? (
-          <EmptyState text={t("no_attendance")} icon={Calendar} />
-        ) : (
+      <PlainCard className="pb-4">
+        <CardTitle right={pct !== null && <Chip tone={pct >= 90 ? "green" : pct >= 80 ? "yellow" : "red"}>{pct}%</Chip>}>{t("attendance_grades")}</CardTitle>
+        {recent.length === 0 ? <EmptyState text={t("no_attendance")} icon={Calendar} /> : (
           <>
             {log.length >= 4 && (
-              <div className="flex items-end gap-[3px] mb-3 h-8">
-                {[...log].reverse().slice(0, 30).map((r, i) => (
-                  <div key={i} title={ruDate(r.date, locale)} className="flex-1 rounded-sm" style={{ height: r.present ? "100%" : r.excused ? "55%" : "30%", background: r.present ? GREEN_D : r.excused ? BLUE : BRICK, opacity: 0.85, minWidth: 2 }} />
+              <div className="flex items-end gap-[3px] my-3 h-8">
+                {[...log].reverse().slice(-30).map((r, i) => (
+                  <div key={i} className="flex-1 rounded-sm" style={{ height: r.present ? "100%" : r.excused ? "55%" : "30%", background: r.present ? GREEN_D : r.excused ? BLUE : BRICK, opacity: 0.85, minWidth: 2 }} />
                 ))}
               </div>
             )}
             <div className="flex gap-2 overflow-x-auto pb-1">
               {recent.map((r, i) => (
                 <div key={i} className="shrink-0 w-16 rounded-2xl p-2 text-center" style={{ background: r.present ? "var(--soft-green-bg)" : r.excused ? "var(--soft-blue-bg)" : "var(--soft-orange-bg)" }}>
-                  <div className="text-[10px] font-medium opacity-50 mono">{ruDate(r.date, locale)}</div>
-                  <div className="text-[16px] my-1">{r.present ? <CheckCircle2 size={16} style={{ color: GREEN_D, display: "inline" }} /> : r.excused ? <Clock size={16} style={{ color: BLUE, display: "inline" }} /> : <XCircle size={16} style={{ color: BRICK, display: "inline" }} />}</div>
-                  {r.grade ? <div className="text-[11px] font-bold text-white rounded-full px-1.5 py-0.5 inline-block" style={{ background: gradeColors[r.grade] }}>{r.grade}</div> : <div className="text-[10px] opacity-30">—</div>}
+                  <div className="text-[10px] font-semibold mono" style={{ color: "var(--ink-2)" }}>{ruDate(r.date, locale)}</div>
+                  <div className="my-1">{r.present ? <CheckCircle2 size={16} style={{ color: GREEN_D, display: "inline" }} /> : r.excused ? <Clock size={16} style={{ color: BLUE, display: "inline" }} /> : <XCircle size={16} style={{ color: BRICK, display: "inline" }} />}</div>
+                  {r.grade ? <div className="text-[11px] font-bold text-white rounded-full px-1.5 py-0.5 inline-block" style={{ background: gradeColors[r.grade] }}>{r.grade}</div> : <div className="text-[10px]" style={{ color: "var(--ink-3)" }}>—</div>}
                 </div>
               ))}
             </div>
             {log.length > 8 && (
-              <button onClick={() => setShowAllAttendance((v) => !v)} className="w-full mt-2 text-[12px] font-semibold py-1.5 opacity-60 flex items-center justify-center gap-1">
-                {showAllAttendance ? t("attendance_less") : t("attendance_more")}
-                <ChevronDownIcon size={14} style={{ transform: showAllAttendance ? "rotate(180deg)" : "none" }} />
+              <button onClick={() => setShowAll((v) => !v)} className="w-full mt-2 text-[12.5px] font-semibold py-1.5 flex items-center justify-center gap-1" style={{ color: "var(--ink-2)" }}>
+                {showAll ? t("attendance_less") : t("attendance_more")}<ChevronDownIcon size={14} style={{ transform: showAll ? "rotate(180deg)" : "none" }} />
               </button>
             )}
           </>
         )}
-      </SectionCard>
-
-      {showCoinsInfo && <CoinsInfoPopup onClose={() => setShowCoinsInfo(false)} t={t} />}
-      {showDebt && <DebtPopup amount={student.debt} adminTelegram={student.adminTelegram} lang={lang} onClose={() => setShowDebt(false)} t={t} />}
+      </PlainCard>
+      {(student.groups || []).length > 0 && (
+        <PlainCard className="pb-2">
+          <CardTitle>{t("my_groups_title")}</CardTitle>
+          {student.groups.map((g, i) => {
+            const [c1] = courseColor(g.course);
+            return (
+              <div key={g.id} className="flex items-center gap-3 py-3" style={{ borderBottom: i === student.groups.length - 1 ? "none" : "1px solid var(--line)" }}>
+                <div className="w-1.5 self-stretch rounded-full" style={{ background: c1 }} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: c1 }}>{g.course}</div>
+                  <div className="text-[14.5px] font-bold" style={{ color: "var(--ink)" }}>{g.name}</div>
+                  <div className="text-[12px] mt-0.5" style={{ color: "var(--ink-2)" }}>{[scheduleText(g, t("no_schedule")), g.room && `${t("room_short")} ${g.room}`, g.teacherName].filter(Boolean).join(" · ")}</div>
+                </div>
+              </div>
+            );
+          })}
+        </PlainCard>
+      )}
     </div>
   );
 }
 
+// ------------------------------- Экран «Объявления» -------------------------------
+function NoticesScreen({ notifications = [], t, lang }) {
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  if (notifications.length === 0) return <PlainCard><EmptyState text={t("notices_none")} icon={Bell} /></PlainCard>;
+  return (
+    <div className="space-y-2.5">
+      {notifications.map((n) => (
+        <PlainCard key={n.id} className="py-3.5" style={n.urgent ? { borderLeft: `4px solid ${RED}` } : {}}>
+          {n.urgent && <div className="text-[10.5px] font-bold uppercase tracking-wide mb-1 flex items-center gap-1" style={{ color: RED }}><Megaphone size={12} />{t("important_notice")}</div>}
+          <div className="text-[14px] font-medium leading-snug" style={{ color: "var(--ink)" }}>{n.text}</div>
+          <div className="text-[11.5px] mt-1.5" style={{ color: "var(--ink-3)" }}>{n.senderName} · {ruDate(n.date, locale)}</div>
+        </PlainCard>
+      ))}
+    </div>
+  );
+}
 
 /* ------------------------------- Рейтинг ------------------------------- */
 const WEEK_DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
@@ -2103,6 +2134,10 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
 /* ----------------------------------- Переводы ----------------------------------- */
 const TRANSLATIONS = {
   ru: {
+    study_title: "Учёба", hw_row_sub_todo: "Нужно: {what}", prog_row_att: "посещаемость {n}%", prog_row_avg: "средний балл {n}", notices_none: "Новых объявлений нет",
+    service_support_lesson_sub: "Отдельный урок с учителем", service_topic_reexplain_sub: "Если тема осталась непонятной", service_materials_only_sub: "Презентация или материалы по теме",
+    adm_home_blocked: "Нет допуска на урок", adm_home_blocked_sub: "Не закрыто ДЗ подряд: {n}. Нажми, чтобы закрыть", adm_home_warn: "Не закрыто ДЗ подряд: {n}", adm_home_warn_sub: "Закрой ДЗ, чтобы сохранить допуск", adm_home_override: "Учитель допустил тебя к уроку",
+    today_lesson_short: "Сегодня", room_short: "каб.", hw_todo_now: "Сделать сейчас", hw_all_tasks: "Все задания", back: "Назад",
     hello_name: "Привет, {name}", next_lesson_label: "Следующий урок", today_short: "сегодня", adm_no_access_short: "Нет допуска на урок", adm_chip_yes: "Допуск", adm_chip_no: "Нет допуска",
     debt_tap_hint: "Нажмите, чтобы узнать, как оплатить", coins_how: "Как получить?", notices_title: "Объявления",
     hw_tasks_count: "дел: {n}", hw_all_closed_short: "Всё закрыто", hw_all_closed_title: "Все ДЗ закрыты", hw_all_closed_sub: "Отлично! Новое задание появится после урока.",
@@ -2196,6 +2231,10 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Победы на олимпиадах, высокие баллы на тестах и другие достижения.",
   },
   en: {
+    study_title: "Study", hw_row_sub_todo: "To do: {what}", prog_row_att: "attendance {n}%", prog_row_avg: "average {n}", notices_none: "No new announcements",
+    service_support_lesson_sub: "A separate lesson with a teacher", service_topic_reexplain_sub: "If a topic is still unclear", service_materials_only_sub: "Slides or materials on a topic",
+    adm_home_blocked: "Not admitted to class", adm_home_blocked_sub: "Homework not closed in a row: {n}. Tap to close it", adm_home_warn: "Homework not closed in a row: {n}", adm_home_warn_sub: "Close your homework to keep access", adm_home_override: "Your teacher admitted you to class",
+    today_lesson_short: "Today", room_short: "room", hw_todo_now: "To do now", hw_all_tasks: "All tasks", back: "Back",
     hello_name: "Hi, {name}", next_lesson_label: "Next lesson", today_short: "today", adm_no_access_short: "Not admitted to class", adm_chip_yes: "Admitted", adm_chip_no: "Not admitted",
     debt_tap_hint: "Tap to see how to pay", coins_how: "How to earn?", notices_title: "Announcements",
     hw_tasks_count: "to do: {n}", hw_all_closed_short: "All closed", hw_all_closed_title: "All homework closed", hw_all_closed_sub: "Great! A new task will appear after class.",
@@ -2289,6 +2328,10 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Wins at olympiads, high test scores, and other achievements.",
   },
   uz: {
+    study_title: "O'qish", hw_row_sub_todo: "Kerak: {what}", prog_row_att: "davomat {n}%", prog_row_avg: "o'rtacha {n}", notices_none: "Yangi e'lonlar yo'q",
+    service_support_lesson_sub: "O'qituvchi bilan alohida dars", service_topic_reexplain_sub: "Mavzu tushunarsiz qolgan bo'lsa", service_materials_only_sub: "Mavzu bo'yicha taqdimot yoki materiallar",
+    adm_home_blocked: "Darsga ruxsat yo'q", adm_home_blocked_sub: "Ketma-ket yopilmagan vazifa: {n}. Yopish uchun bosing", adm_home_warn: "Ketma-ket yopilmagan vazifa: {n}", adm_home_warn_sub: "Ruxsatni saqlash uchun vazifani yoping", adm_home_override: "O'qituvchi sizni darsga qo'ydi",
+    today_lesson_short: "Bugun", room_short: "xona", hw_todo_now: "Hozir qilish kerak", hw_all_tasks: "Barcha vazifalar", back: "Orqaga",
     hello_name: "Salom, {name}", next_lesson_label: "Keyingi dars", today_short: "bugun", adm_no_access_short: "Darsga ruxsat yo'q", adm_chip_yes: "Ruxsat bor", adm_chip_no: "Ruxsat yo'q",
     debt_tap_hint: "Qanday to'lashni bilish uchun bosing", coins_how: "Qanday olinadi?", notices_title: "E'lonlar",
     hw_tasks_count: "vazifa: {n}", hw_all_closed_short: "Hammasi yopildi", hw_all_closed_title: "Barcha vazifalar yopildi", hw_all_closed_sub: "Ajoyib! Yangi vazifa darsdan keyin chiqadi.",
@@ -2411,7 +2454,11 @@ export default function ParentApp() {
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
-  const [tab, setTab] = useState("home");
+  const [tab, setTabRaw] = useState("home");
+  // Отдельные экраны, открываемые с главной: "homework" | "progress" | "notices" (как вкладка, со стрелкой «назад»).
+  const [screen, setScreen] = useState(null);
+  const setTab = (k) => { setScreen(null); setTabRaw(k); };
+  const openScreen = (sc) => { haptic("light"); setTabRaw("home"); setScreen(sc); try { window.scrollTo({ top: 0 }); } catch {} };
   const [redeeming, setRedeeming] = useState(false);
   const [toast, setToast] = useState("");
   const [langMenuOpen, setLangMenuOpen] = useState(false);
@@ -2641,6 +2688,25 @@ export default function ParentApp() {
 
   const student = students.find((s) => s.id === activeId);
 
+  // Системная кнопка «Назад» Telegram на отдельных экранах.
+  useEffect(() => {
+    const bb = window.Telegram?.WebApp?.BackButton;
+    if (!bb) return;
+    const back = () => setScreen(null);
+    try { if (screen) { bb.show(); bb.onClick(back); } else bb.hide(); } catch {}
+    return () => { try { bb.offClick(back); } catch {} };
+  }, [screen]);
+  // Если ученик вышел посреди мини-теста — при входе сразу открываем экран ДЗ (а там и сам тест).
+  const restoredScreenRef = useRef(false);
+  useEffect(() => {
+    if (!student || restoredScreenRef.current) return;
+    restoredScreenRef.current = true;
+    const key = `gu_open_lesson_${student.id}`;
+    let local = null; try { local = localStorage.getItem(key); } catch {}
+    if (local) { setScreen("homework"); return; }
+    storageGet(key).then((v) => { if (v) setScreen((cur) => cur || "homework"); });
+  }, [student?.id]);
+
   const handleRedeem = async (itemId) => {
     if (!student) return;
     setRedeeming(true);
@@ -2832,12 +2898,18 @@ export default function ParentApp() {
       )}
 
       {/* Красная фирменная шапка: на главной она выше — на ней лежат баланс и монеты, а карточка урока «заходит» на неё. */}
-      <div aria-hidden className="absolute left-0 right-0 top-0 overflow-hidden pointer-events-none" style={{ height: tab === "home" ? "calc(var(--gu-safe-top, 0px) + 212px)" : "calc(var(--gu-safe-top, 0px) + 92px)", background: theme === "dark" ? "linear-gradient(160deg, #7F1D1D, #5B1414 55%, #3B0D0D)" : "linear-gradient(160deg, #EF4444, #B91C1C 60%, #7F1D1D)", borderRadius: "0 0 32px 32px", transition: "height .25s ease" }}>
+      <div aria-hidden className="absolute left-0 right-0 top-0 overflow-hidden pointer-events-none" style={{ height: tab === "home" && !screen ? "calc(var(--gu-safe-top, 0px) + 178px)" : "calc(var(--gu-safe-top, 0px) + 92px)", background: theme === "dark" ? "linear-gradient(160deg, #7F1D1D, #5B1414 55%, #3B0D0D)" : "linear-gradient(160deg, #EF4444, #B91C1C 60%, #7F1D1D)", borderRadius: "0 0 32px 32px", transition: "height .25s ease" }}>
         <div className="absolute rounded-full" style={{ width: 220, height: 220, right: -70, top: -60, background: "rgba(255,255,255,0.08)" }} />
         <div className="absolute rounded-full" style={{ width: 140, height: 140, left: -50, bottom: -50, background: "rgba(255,255,255,0.06)" }} />
       </div>
 
       <div className="relative px-4 pb-3 flex items-center justify-between gap-2 text-white" style={{ paddingTop: "calc(18px + var(--gu-safe-top, 0px))" }}>
+        {screen ? (
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button onClick={() => { haptic("light"); setScreen(null); }} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={GLASS_BTN} aria-label={t("back")}><ChevronLeft size={20} /></button>
+            <div className="text-[18px] font-extrabold truncate">{screen === "homework" ? t("homework") : screen === "progress" ? t("progress_title") : t("notices_title")}</div>
+          </div>
+        ) : (
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="rounded-full shrink-0" style={{ boxShadow: "0 0 0 2.5px rgba(255,255,255,0.85)", borderRadius: 999 }}>
             <Avatar name={student?.name || "?"} size={42} avatarUrl={student?.avatarUrl} />
@@ -2852,21 +2924,22 @@ export default function ParentApp() {
                 <ChevronDownIcon size={13} className="absolute right-1.5 pointer-events-none" />
               </div>
             ) : (
-              <div className="text-[11.5px] opacity-80 mt-0.5 truncate">{(student?.groups || []).map((g) => g.name).join(" · ") || student?.group?.name || "Global Up"}</div>
+              <div className="text-[11.5px] mt-0.5 truncate" style={{ color: "rgba(255,255,255,0.75)" }}>{(student?.groups || []).map((g) => g.name).join(" · ") || student?.group?.name || "Global Up"}</div>
             )}
           </div>
         </div>
+        )}
         <div className="flex items-center gap-1.5 shrink-0">
           {student?.logoUrl && (
             <img src={student.logoUrl} alt="Global Up" className="w-9 h-9 rounded-full object-cover shrink-0" style={{ border: "2px solid rgba(255,255,255,0.6)" }} />
           )}
-          {(student?.notifications || []).length > 0 && (
-            <button onClick={() => { haptic("light"); setTab("home"); setTimeout(() => { try { document.getElementById("gu-notices")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {} }, 80); }} className="relative w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform" style={GLASS_BTN} aria-label={t("notices_title")}>
+          {!screen && (student?.notifications || []).length > 0 && (
+            <button onClick={() => openScreen("notices")} className="relative w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform" style={GLASS_BTN} aria-label={t("notices_title")}>
               <Bell size={17} />
               <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full text-[10px] font-black flex items-center justify-center" style={{ background: "#fff", color: RED_D }}>{student.notifications.length}</span>
             </button>
           )}
-          <div className="relative">
+          <div className="relative" style={{ display: screen ? "none" : "block" }}>
             <button onClick={() => setLangMenuOpen((v) => !v)} className="h-9 px-2.5 rounded-full flex items-center justify-center gap-1 text-[11.5px] font-extrabold active:scale-90 transition-transform" style={GLASS_BTN}>
               <Globe size={15} />{LANG_FLAGS[lang]}
             </button>
@@ -2896,8 +2969,11 @@ export default function ParentApp() {
       {!student ? (
         <div className="relative px-4"><EmptyState text={t("empty_student")} /></div>
       ) : (
-        <div className="relative px-4" style={{ paddingTop: tab === "home" ? 0 : 26 }}>
-          {tab === "home" && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onRequestService={handleRequestService} onSubmitQuiz={handleSubmitQuiz} />}
+        <div className="relative px-4" style={{ paddingTop: tab === "home" && !screen ? 0 : 26 }}>
+          {tab === "home" && !screen && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onRequestService={handleRequestService} onOpenScreen={openScreen} />}
+          {tab === "home" && screen === "homework" && <HomeworkScreen student={student} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onSubmitQuiz={handleSubmitQuiz} />}
+          {tab === "home" && screen === "progress" && <ProgressScreen student={student} t={t} lang={lang} />}
+          {tab === "home" && screen === "notices" && <NoticesScreen notifications={student.notifications || []} t={t} lang={lang} />}
           {tab === "schedule" && <ScheduleTab student={student} t={t} lang={lang} />}
           {tab === "rating" && <RatingTab student={student} t={t} />}
           {tab === "shop" && <ShopTab student={student} shopItems={shopItems} onRedeem={handleRedeem} redeeming={redeeming} t={t} lang={lang} />}
