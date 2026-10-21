@@ -484,7 +484,7 @@ function ServiceRequestModal({ type, student, onClose, onSubmit, t }) {
     if (ok) onClose();
   };
   return (
-    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-5" style={{ background: "rgba(0,0,0,0.45)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-5" style={{ background: "rgba(0,0,0,0.45)", paddingTop: "var(--gu-safe-top, 0px)", paddingBottom: "var(--gu-safe-bottom, 0px)" }} onClick={onClose}>
       <div className="anim-pop w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6" style={{ background: "var(--surface)" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[16px] font-bold flex items-center gap-2"><meta.icon size={20} style={{ color: meta.color }} />{t(`service_${type}_title`)}</h2>
@@ -536,7 +536,7 @@ function CoinsInfoPopup({ onClose, t }) {
     { icon: Trophy, bg: "var(--soft-purple-bg)", fg: "var(--soft-purple-fg)", title: t("coins_info_achievements_title"), text: t("coins_info_achievements_text") },
   ];
   return (
-    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-5" style={{ background: "rgba(0,0,0,0.45)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-5" style={{ background: "rgba(0,0,0,0.45)", paddingTop: "var(--gu-safe-top, 0px)", paddingBottom: "var(--gu-safe-bottom, 0px)" }} onClick={onClose}>
       <div className="anim-pop w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6 max-h-[85vh] overflow-y-auto" style={{ background: "var(--surface)" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[16px] font-bold flex items-center gap-2"><CoinsIcon size={18} style={{ color: GOLD }} />{t("coins_info_title")}</h2>
@@ -561,7 +561,7 @@ function CoinsInfoPopup({ onClose, t }) {
 }
 function DebtPopup({ amount, adminTelegram, lang, onClose, t }) {
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-5" style={{ background: "rgba(0,0,0,0.45)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-5" style={{ background: "rgba(0,0,0,0.45)", paddingTop: "var(--gu-safe-top, 0px)", paddingBottom: "var(--gu-safe-bottom, 0px)" }} onClick={onClose}>
       <div className="anim-pop w-full max-w-sm rounded-3xl p-6 text-center" style={{ background: "var(--surface)" }} onClick={(e) => e.stopPropagation()}>
         <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: RED_L }}>
           <Wallet size={26} style={{ color: RED_D }} />
@@ -717,7 +717,7 @@ function TopicReviewSheet({ h, t, onClose, onSubmitQuiz }) {
 
   return createPortal(
     <div className={`${document.querySelector(".theme-dark") ? "theme-dark" : "theme-light"} fixed inset-0 z-[120] flex flex-col`} style={{ background: "var(--paper)", color: "var(--ink)" }}>
-      <div className="shrink-0 px-4 pb-3" style={{ background: "var(--surface)", borderBottom: "1px solid var(--line)", paddingTop: "max(16px, env(safe-area-inset-top))" }}>
+      <div className="shrink-0 px-4 pb-3" style={{ background: "var(--surface)", borderBottom: "1px solid var(--line)", paddingTop: "calc(16px + var(--gu-safe-top, env(safe-area-inset-top, 0px)))" }}>
         <div className="flex items-center justify-between gap-2 max-w-md mx-auto">
           <h2 className="text-[16px] font-extrabold flex items-center gap-2">📘 {t("lesson_title")}</h2>
           <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }}><X size={16} /></button>
@@ -837,7 +837,7 @@ function TopicReviewSheet({ h, t, onClose, onSubmitQuiz }) {
         </div>
       </div>
 
-      <div className="shrink-0 px-4 pt-3" style={{ background: "var(--surface)", borderTop: "1px solid var(--line)", paddingBottom: "max(14px, env(safe-area-inset-bottom))" }}>
+      <div className="shrink-0 px-4 pt-3" style={{ background: "var(--surface)", borderTop: "1px solid var(--line)", paddingBottom: "calc(14px + var(--gu-safe-bottom, env(safe-area-inset-bottom, 0px)))" }}>
         <div className="max-w-md mx-auto">
           {step === "learn" && (st.done || st.outOfAttempts ? (
             <button onClick={() => (st.result ? setStep("result") : onClose())} className="w-full py-3.5 rounded-2xl text-[15px] font-bold text-white" style={{ background: BLUE }}>{st.result ? t("quiz_back_to_result") : t("quiz_done")}</button>
@@ -1861,7 +1861,7 @@ function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme
 /* -------------------------------- Экран входа -------------------------------- */
 function LoginScreen({ phone, setPhone, password, setPassword, loginError, loginLoading, onLogin, lang, changeLang, theme, changeTheme, t }) {
   return (
-    <div className={`theme-${theme} min-h-screen flex items-center justify-center p-4`} style={{ background: PAPER }}>
+    <div className={`theme-${theme} min-h-screen flex items-center justify-center p-4`} style={{ paddingTop: "calc(16px + var(--gu-safe-top, 0px))", background: PAPER }}>
       <style>{FONT_IMPORT}</style>
       <style>{THEME_VARS}</style>
       <div className="w-full max-w-sm">
@@ -2335,6 +2335,17 @@ export default function ParentApp() {
     };
   }, [pullDistance, phase]);
 
+  // Цвет шапки/фона Telegram под тему приложения — в полноэкранном режиме от него зависит, будут ли
+  // видны часы и значки телефона сверху (светлые на тёмном фоне, тёмные на светлом).
+  useEffect(() => {
+    const tg = window.Telegram?.WebApp;
+    if (!tg) return;
+    const color = theme === "dark" ? "#16171C" : "#F7F5F0";
+    try { tg.setHeaderColor && tg.setHeaderColor(color); } catch {}
+    try { tg.setBackgroundColor && tg.setBackgroundColor(color); } catch {}
+    try { tg.setBottomBarColor && tg.setBottomBarColor(color); } catch {}
+  }, [theme]);
+
   useEffect(() => {
     // Запрещаем зум страницы (иначе на iPhone/Android при определённых жестах или при фокусе
     // на поле ввода экран мог неожиданно "приближаться" и увеличиваться) — правим тег viewport
@@ -2351,8 +2362,24 @@ export default function ParentApp() {
     if (tg) {
       tg.ready();
       tg.expand();
-      if (tg.setHeaderColor) try { tg.setHeaderColor("#F7F5F0"); } catch {}
-      if (tg.setBackgroundColor) try { tg.setBackgroundColor("#F7F5F0"); } catch {}
+      // Отступы под системные элементы: в полноэкранном режиме сверху лежат часы телефона и кнопки
+      // Telegram («Закрыть», «⋯»), снизу — полоска «домой». Telegram сообщает их размеры, а мы кладём
+      // их в CSS-переменные --gu-safe-top / --gu-safe-bottom, на которые опирается весь интерфейс.
+      const applySafeArea = () => {
+        const sa = tg.safeAreaInset || {};
+        const ca = tg.contentSafeAreaInset || {};
+        const root = document.documentElement.style;
+        root.setProperty("--gu-safe-top", `${(sa.top || 0) + (ca.top || 0)}px`);
+        root.setProperty("--gu-safe-bottom", `${(sa.bottom || 0) + (ca.bottom || 0)}px`);
+      };
+      applySafeArea();
+      ["safeAreaChanged", "contentSafeAreaChanged", "fullscreenChanged", "viewportChanged"].forEach((ev) => { try { tg.onEvent(ev, applySafeArea); } catch {} });
+      // Полноэкранный режим — только на телефонах (на компьютере он растянул бы окно Telegram на весь монитор).
+      const isPhone = ["ios", "android", "android_x"].includes(tg.platform);
+      const supports = (v) => { try { return !!tg.isVersionAtLeast && tg.isVersionAtLeast(v); } catch { return false; } };
+      if (isPhone && supports("8.0") && tg.requestFullscreen && !tg.isFullscreen) { try { tg.requestFullscreen(); } catch {} }
+      // Чтобы приложение не закрывалось случайным свайпом вниз (особенно при «потянуть, чтобы обновить»).
+      if (supports("7.7") && tg.disableVerticalSwipes) { try { tg.disableVerticalSwipes(); } catch {} }
     }
     const data0 = tg?.initData || "";
     setInitData(data0);
@@ -2544,7 +2571,7 @@ export default function ParentApp() {
 
   if (phase === "loading") {
     return (
-      <div className={`theme-${theme} min-h-screen pb-10`} style={{ background: PAPER }}>
+      <div className={`theme-${theme} min-h-screen pb-10`} style={{ paddingTop: "var(--gu-safe-top, 0px)", background: PAPER }}>
         <style>{FONT_IMPORT}</style>
         <style>{THEME_VARS}</style>
         <style>{`@keyframes skeletonPulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }`}</style>
@@ -2570,7 +2597,7 @@ export default function ParentApp() {
 
   if (phase === "error") {
     return (
-      <div className={`theme-${theme} min-h-screen flex items-center justify-center p-4`} style={{ background: PAPER, color: INK }}>
+      <div className={`theme-${theme} min-h-screen flex items-center justify-center p-4`} style={{ paddingTop: "calc(16px + var(--gu-safe-top, 0px))", background: PAPER, color: INK }}>
         <style>{FONT_IMPORT}</style>
         <style>{THEME_VARS}</style>
         <div className="max-w-sm text-center">
@@ -2587,14 +2614,14 @@ export default function ParentApp() {
   }
 
   return (
-    <div className={`theme-${theme} min-h-screen anim-fade pb-24`} style={{ background: PAPER, color: INK }}>
+    <div className={`theme-${theme} min-h-screen anim-fade`} style={{ background: PAPER, color: INK, paddingBottom: "calc(96px + var(--gu-safe-bottom, env(safe-area-inset-bottom, 0px)))" }}>
       <style>{FONT_IMPORT}</style>
       <style>{THEME_VARS}</style>
 
       {coinGain && <ConfettiOverlay amount={coinGain.amount} grade={coinGain.grade} onDone={() => setCoinGain(null)} t={t} />}
 
       {pullDistance > 0 && (
-        <div className="fixed top-0 left-0 right-0 flex justify-center z-40 pointer-events-none" style={{ paddingTop: 10, opacity: Math.min(1, pullDistance / 40) }}>
+        <div className="fixed top-0 left-0 right-0 flex justify-center z-40 pointer-events-none" style={{ paddingTop: "calc(10px + var(--gu-safe-top, 0px))", opacity: Math.min(1, pullDistance / 40) }}>
           <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--surface)", boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
             <RefreshCw size={15} style={{ color: RED, transform: `rotate(${pullDistance * 4}deg)`, opacity: pullDistance >= PULL_THRESHOLD ? 1 : 0.5 }} />
           </div>
@@ -2602,12 +2629,12 @@ export default function ParentApp() {
       )}
 
       {toast && (
-        <div className="fixed top-4 left-4 right-4 z-50 px-4 py-3 rounded-2xl text-[13px] font-medium text-white text-center" style={{ background: RED_D, boxShadow: "0 4px 16px rgba(0,0,0,0.2)" }}>
+        <div className="fixed left-4 right-4 z-50 px-4 py-3 rounded-2xl text-[13px] font-medium text-white text-center" style={{ top: "calc(16px + var(--gu-safe-top, 0px))", background: RED_D, boxShadow: "0 4px 16px rgba(0,0,0,0.2)" }}>
           {toast}
         </div>
       )}
 
-      <div className="px-4 pt-5 pb-3 flex items-center justify-between">
+      <div className="px-4 pb-3 flex items-center justify-between" style={{ paddingTop: "calc(20px + var(--gu-safe-top, 0px))" }}>
         <div className="flex items-center gap-2.5">
           <Avatar name={student?.name || "?"} size={38} avatarUrl={student?.avatarUrl} />
           <div>
@@ -2666,7 +2693,7 @@ export default function ParentApp() {
       )}
 
       {/* Нижняя навигация */}
-      <div className="fixed bottom-0 left-0 right-0 px-3 pb-3 pt-2 z-20" style={{ background: "linear-gradient(to top, var(--paper) 75%, rgba(0,0,0,0))" }}>
+      <div className="fixed bottom-0 left-0 right-0 px-3 pt-2 z-20" style={{ paddingBottom: "calc(12px + var(--gu-safe-bottom, env(safe-area-inset-bottom, 0px)))", background: "linear-gradient(to top, var(--paper) 75%, rgba(0,0,0,0))" }}>
         <div className="flex items-center justify-around rounded-3xl px-1.5 py-1.5" style={{ background: "var(--surface)", boxShadow: "0 8px 28px rgba(26,26,23,0.14)", border: "1px solid var(--line)", backdropFilter: "blur(12px)" }}>
           {tabsFor(t).map((tabItem) => {
             const active = tab === tabItem.key;
