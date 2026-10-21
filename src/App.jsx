@@ -56,7 +56,7 @@ const {
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v20";
+const APP_VERSION = "v21";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
 
@@ -1318,20 +1318,20 @@ function CardTitle({ children, right }) {
 // Квадратная плитка: иконка сверху, справа сверху — счётчик, внизу — название и короткая подпись.
 function SquareTile({ icon, tile, color, title, sub, badge, onClick }) {
   return (
-    <button onClick={() => { haptic("light"); onClick && onClick(); }} className="aspect-square rounded-[22px] p-3 flex flex-col justify-between text-left active:scale-[0.96] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 4px 16px rgba(26,26,23,0.06)" }}>
+    <button onClick={() => { haptic("light"); onClick && onClick(); }} className="aspect-square rounded-[20px] p-3.5 flex flex-col justify-between text-left active:scale-[0.96] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 4px 16px rgba(26,26,23,0.06)" }}>
       <div className="flex items-start justify-between w-full gap-1">
         <IconTile icon={icon} bg={tile} color={color} size={38} iconSize={19} radius={12} />
         {badge}
       </div>
       <div className="min-w-0 w-full">
-        <div className="text-[13.5px] font-bold leading-tight" style={{ color: "var(--ink)" }}>{title}</div>
-        {sub && <div className="text-[11px] mt-0.5 truncate" style={{ color: "var(--ink-sub)" }}>{sub}</div>}
+        <div className="text-[13.5px] font-bold" style={{ color: "var(--ink)", lineHeight: 1.2 }}>{title}</div>
+        {sub !== undefined && <div className="text-[11px] mt-1 truncate" style={{ color: "var(--ink-sub)" }}>{sub || "\u00A0"}</div>}
       </div>
     </button>
   );
 }
-function SectionLabel({ children }) {
-  return <div className="text-[12px] font-bold uppercase tracking-[0.06em] px-1 pt-1.5 -mb-0.5" style={{ color: "var(--ink-3)" }}>{children}</div>;
+function SectionLabel({ children, className = "" }) {
+  return <div className={`text-[12px] font-bold uppercase tracking-[0.07em] px-1 mb-2.5 ${className}`} style={{ color: "var(--ink-3)" }}>{children}</div>;
 }
 
 // ------------------------------- Главная (минималистичная) -------------------------------
@@ -1364,9 +1364,9 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
   const glass = { background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(8px)" };
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col">
       {/* Ближайший урок — крупно прямо на красной шапке (вариант D) */}
-      <div className="text-white pt-4 pb-1">
+      <div id="gu-home-hero" className="text-white pt-4">
         {(student.groups || []).length === 0 || lessons.length === 0 ? (
           <div className="py-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.72)" }}>{t("next_lesson_label")}</div>
@@ -1384,18 +1384,18 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
             <>
               <div className="flex items-end justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[11px] font-bold uppercase tracking-wide truncate" style={{ color: "rgba(255,255,255,0.75)" }}>{dayLabel} · {g.name}</div>
-                  <div className="text-[46px] font-black leading-none mt-1.5" style={{ letterSpacing: "-1px" }}>{g.start}</div>
-                  <div className="text-[12px] mt-1.5 truncate" style={{ color: "rgba(255,255,255,0.8)" }}>{[g.room && `${t("room_short")} ${g.room}`, g.teacherName, when].filter(Boolean).join(" · ")}</div>
+                  <div className="text-[11px] font-bold uppercase tracking-[0.06em] truncate" style={{ color: "rgba(255,255,255,0.75)" }}>{dayLabel} · {g.name}</div>
+                  <div className="text-[48px] font-black leading-none mt-2" style={{ letterSpacing: "-1.5px" }}>{g.start}</div>
+                  <div className="text-[12.5px] mt-2 truncate" style={{ color: "rgba(255,255,255,0.82)" }}>{[g.room && `${t("room_short")} ${g.room}`, g.teacherName, when].filter(Boolean).join(" · ")}</div>
                 </div>
                 {adm && adm.mode !== "off" && (
-                  <span className="text-[11.5px] font-bold px-2.5 py-1 rounded-full shrink-0 inline-flex items-center gap-1 mb-1" style={{ background: "#fff", color: isBlocked ? RED_D : GREEN_D }}>
+                  <span className="text-[12px] font-bold px-3 py-1.5 rounded-full shrink-0 inline-flex items-center gap-1" style={{ background: "#fff", color: isBlocked ? RED_D : GREEN_D }}>
                     {isBlocked ? <Ban size={12} /> : <Check size={12} />}{isBlocked ? t("adm_chip_no") : t("adm_chip_yes")}
                   </span>
                 )}
               </div>
               {lessons.length > 1 && (
-                <div className="text-[11.5px] mt-2 truncate" style={{ color: "rgba(255,255,255,0.75)" }}>
+                <div className="text-[11.5px] mt-2.5 truncate" style={{ color: "rgba(255,255,255,0.75)" }}>
                   {t("lesson_also")}: {lessons.slice(1).map((x) => `${x.group.start} ${x.group.name}`).join(", ")}
                 </div>
               )}
@@ -1405,18 +1405,18 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
       </div>
 
       {/* Деньги — белые карточки, наполовину заходят на шапку */}
-      <div className="grid grid-cols-2 gap-2.5 pt-3">
-        <button onClick={() => (hasDebt ? setShowDebt(true) : null)} className="rounded-[20px] p-3 flex items-center gap-2.5 text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 8px 24px rgba(26,26,23,0.10)" }}>
+      <div id="gu-band-anchor" className="grid grid-cols-2 gap-3 mt-6">
+        <button onClick={() => (hasDebt ? setShowDebt(true) : null)} className="rounded-[20px] px-3.5 py-3 flex items-center gap-3 text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 8px 24px rgba(26,26,23,0.10)" }}>
           <IconTile icon={Wallet} bg={hasDebt ? "var(--soft-red-bg)" : "var(--soft-green-bg)"} color={hasDebt ? RED_D : GREEN_D} size={38} iconSize={18} radius={12} />
           <div className="min-w-0">
-            <div className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink-3)" }}>{hasDebt ? t("debt") : t("balance")}</div>
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.05em] mb-0.5" style={{ color: "var(--ink-3)" }}>{hasDebt ? t("debt") : t("balance")}</div>
             <div className="text-[16px] font-extrabold leading-tight truncate" style={{ color: hasDebt ? RED_D : "var(--ink)" }}>{fmt(hasDebt ? student.debt : (student.prepaidCredit || 0))} <span className="text-[11px] font-semibold" style={{ color: "var(--ink-3)" }}>{currency}</span></div>
           </div>
         </button>
-        <button onClick={() => setShowCoinsInfo(true)} className="rounded-[20px] p-3 flex items-center gap-2.5 text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 8px 24px rgba(26,26,23,0.10)" }}>
+        <button onClick={() => setShowCoinsInfo(true)} className="rounded-[20px] px-3.5 py-3 flex items-center gap-3 text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 8px 24px rgba(26,26,23,0.10)" }}>
           <IconTile icon={CoinsIcon} bg="var(--soft-orange-bg)" color="#C2410C" size={38} iconSize={18} radius={12} />
           <div className="min-w-0 flex-1">
-            <div className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink-3)" }}>GlobalCoins</div>
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.05em] mb-0.5" style={{ color: "var(--ink-3)" }}>GlobalCoins</div>
             <div className="text-[16px] font-extrabold leading-tight" style={{ color: "var(--ink)" }}>{student.coins} <span className="text-[11px] font-semibold" style={{ color: "var(--ink-3)" }}>GC</span></div>
           </div>
           <Info size={15} className="shrink-0" style={{ color: "var(--ink-3)" }} />
@@ -1425,25 +1425,25 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
 
       {/* Срочное — коротко, по нажатию открывается подробно */}
       {(blocked.length > 0 || warned.length > 0 || urgent.length > 0) && (
-        <div className="space-y-2">
+        <div className="space-y-2.5 mt-4">
           {blocked.map((a) => (
-            <button key={"b" + a.groupId} onClick={() => onOpenScreen("homework")} className="w-full rounded-[18px] px-3.5 py-3 flex items-center gap-3 text-left" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>
+            <button key={"b" + a.groupId} onClick={() => onOpenScreen("homework")} className="w-full rounded-[20px] px-4 py-3.5 flex items-center gap-3 text-left" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>
               <Ban size={18} className="shrink-0" />
-              <div className="min-w-0 flex-1"><div className="text-[13.5px] font-bold">{t("adm_home_blocked")}</div><div className="text-[11.5px] opacity-60">{t("adm_home_blocked_short")}</div></div>
+              <div className="min-w-0 flex-1"><div className="text-[13.5px] font-bold leading-tight">{t("adm_home_blocked")}</div><div className="text-[11.5px] opacity-60 mt-0.5">{t("adm_home_blocked_short")}</div></div>
               <ChevronRight size={16} className="shrink-0 opacity-70" />
             </button>
           ))}
           {warned.map((a) => (
-            <button key={"w" + a.groupId} onClick={() => onOpenScreen("homework")} className="w-full rounded-[18px] px-3.5 py-3 flex items-center gap-3 text-left" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}>
+            <button key={"w" + a.groupId} onClick={() => onOpenScreen("homework")} className="w-full rounded-[20px] px-4 py-3.5 flex items-center gap-3 text-left" style={{ background: "var(--soft-yellow-bg)", color: "var(--soft-yellow-fg)" }}>
               <AlertTriangle size={18} className="shrink-0" />
-              <div className="min-w-0 flex-1"><div className="text-[13.5px] font-bold">{a.overridden && a.streak >= a.limit ? t("adm_home_override") : t("adm_home_warn", { n: a.streak })}</div><div className="text-[11.5px] opacity-60">{t("adm_home_warn_short")}</div></div>
+              <div className="min-w-0 flex-1"><div className="text-[13.5px] font-bold">{a.overridden && a.streak >= a.limit ? t("adm_home_override") : t("adm_home_warn", { n: a.streak })}</div><div className="text-[11.5px] opacity-60 mt-0.5">{t("adm_home_warn_short")}</div></div>
               <ChevronRight size={16} className="shrink-0 opacity-70" />
             </button>
           ))}
           {urgent.slice(0, 1).map((n) => (
-            <button key={n.id} onClick={() => onOpenScreen("notices")} className="w-full rounded-[18px] px-3.5 py-3 flex items-center gap-3 text-left text-white" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
+            <button key={n.id} onClick={() => onOpenScreen("notices")} className="w-full rounded-[20px] px-4 py-3.5 flex items-center gap-3 text-left text-white" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>
               <Megaphone size={18} className="shrink-0" />
-              <div className="min-w-0 flex-1"><div className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.75)" }}>{t("important_notice")}</div><div className="text-[13.5px] font-semibold leading-snug truncate">{n.text}</div></div>
+              <div className="min-w-0 flex-1"><div className="text-[10.5px] font-bold uppercase tracking-[0.05em]" style={{ color: "rgba(255,255,255,0.75)" }}>{t("important_notice")}</div><div className="text-[13.5px] font-semibold leading-tight truncate mt-0.5">{n.text}</div></div>
               <ChevronRight size={16} className="shrink-0 opacity-80" />
             </button>
           ))}
@@ -1451,8 +1451,8 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
       )}
 
       {/* Учёба: квадратные плитки — каждая открывает свой экран */}
-      <SectionLabel>{t("study_title")}</SectionLabel>
-      <div className="grid grid-cols-3 gap-2.5">
+      <SectionLabel className="mt-7">{t("study_title")}</SectionLabel>
+      <div className="grid grid-cols-3 gap-3">
         <SquareTile icon={BookOpen} tile="var(--soft-purple-bg)" color={PURPLE} title={t("homework_short")} sub={hwSub} onClick={() => onOpenScreen("homework")}
           badge={actionable.length > 0 ? <Chip tone="red">{actionable.length}</Chip> : inProgress > 0 ? <Loader2 size={15} className="animate-spin" style={{ color: BLUE }} /> : (student.materials || []).length ? <CheckCircle2 size={17} style={{ color: GREEN_D }} /> : null} />
         <SquareTile icon={TrendingUp} tile="var(--soft-green-bg)" color={GREEN_D} title={t("progress_short")} sub={progSub} onClick={() => onOpenScreen("progress")} />
@@ -1461,8 +1461,8 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
       </div>
 
       {/* Сервис — тоже квадратные плитки */}
-      <SectionLabel>{t("service_section_title")}</SectionLabel>
-      <div className="grid grid-cols-3 gap-2.5">
+      <SectionLabel className="mt-6">{t("service_section_title")}</SectionLabel>
+      <div className="grid grid-cols-3 gap-3">
         {[
           { type: "support_lesson", icon: LifeBuoy, tile: "var(--soft-red-bg)", color: RED_D },
           { type: "topic_reexplain", icon: RefreshCw, tile: "var(--soft-blue-bg)", color: BLUE },
@@ -2778,6 +2778,25 @@ export default function ParentApp() {
 
   const student = students.find((s) => s.id === activeId);
 
+  // Высота красной шапки на главной: до середины карточек «Баланс / GlobalCoins», как бы ни менялся текст урока.
+  const [homeBandH, setHomeBandH] = useState(null);
+  useEffect(() => {
+    if (tab !== "home" || screen) return;
+    const measure = () => {
+      const el = document.getElementById("gu-band-anchor");
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setHomeBandH(Math.round(r.top + window.scrollY + r.height / 2));
+    };
+    measure();
+    const timer = setTimeout(measure, 80);
+    const hero = document.getElementById("gu-home-hero");
+    const ro = typeof ResizeObserver !== "undefined" && hero ? new ResizeObserver(measure) : null;
+    if (ro) ro.observe(hero);
+    window.addEventListener("resize", measure);
+    return () => { clearTimeout(timer); if (ro) ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, [tab, screen, student?.id, lang, phase]);
+
   // Системная кнопка «Назад» Telegram на отдельных экранах.
   useEffect(() => {
     const bb = window.Telegram?.WebApp?.BackButton;
@@ -2967,7 +2986,7 @@ export default function ParentApp() {
   }
 
   return (
-    <div className={`theme-${theme} min-h-screen anim-fade relative`} style={{ background: PAPER, color: INK, paddingBottom: "calc(100px + var(--gu-safe-bottom, env(safe-area-inset-bottom, 0px)))" }}>
+    <div className={`theme-${theme} min-h-screen anim-fade relative`} style={{ background: PAPER, color: INK, paddingBottom: "calc(112px + var(--gu-safe-bottom, env(safe-area-inset-bottom, 0px)))" }}>
       <style>{FONT_IMPORT}</style>
       <style>{THEME_VARS}</style>
 
@@ -2988,12 +3007,12 @@ export default function ParentApp() {
       )}
 
       {/* Красная фирменная шапка: на главной она выше — на ней лежат баланс и монеты, а карточка урока «заходит» на неё. */}
-      <div aria-hidden className="absolute left-0 right-0 top-0 overflow-hidden pointer-events-none" style={{ height: tab === "home" && !screen ? "calc(var(--gu-safe-top, 0px) + 236px)" : "calc(var(--gu-safe-top, 0px) + 92px)", background: theme === "dark" ? "linear-gradient(160deg, #7F1D1D, #5B1414 55%, #3B0D0D)" : "linear-gradient(160deg, #EF4444, #B91C1C 60%, #7F1D1D)", borderRadius: "0 0 32px 32px", transition: "height .25s ease" }}>
+      <div aria-hidden className="absolute left-0 right-0 top-0 overflow-hidden pointer-events-none" style={{ height: tab === "home" && !screen ? (homeBandH ? `${homeBandH}px` : "calc(var(--gu-safe-top, 0px) + 236px)") : "calc(var(--gu-safe-top, 0px) + 92px)", background: theme === "dark" ? "linear-gradient(160deg, #7F1D1D, #5B1414 55%, #3B0D0D)" : "linear-gradient(160deg, #EF4444, #B91C1C 60%, #7F1D1D)", borderRadius: "0 0 32px 32px", transition: "height .25s ease" }}>
         <div className="absolute rounded-full" style={{ width: 220, height: 220, right: -70, top: -60, background: "rgba(255,255,255,0.08)" }} />
         <div className="absolute rounded-full" style={{ width: 140, height: 140, left: -50, bottom: -50, background: "rgba(255,255,255,0.06)" }} />
       </div>
 
-      <div className="relative px-4 pb-3 flex items-center justify-between gap-2 text-white" style={{ paddingTop: "calc(18px + var(--gu-safe-top, 0px))" }}>
+      <div className="relative px-4 pb-2 flex items-center justify-between gap-3 text-white" style={{ paddingTop: "calc(14px + var(--gu-safe-top, 0px))" }}>
         {screen ? (
           <div className="flex items-center gap-2.5 min-w-0">
             <button onClick={() => { haptic("light"); setScreen(null); }} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={GLASS_BTN} aria-label={t("back")}><ChevronLeft size={20} /></button>
@@ -3020,9 +3039,6 @@ export default function ParentApp() {
         </div>
         )}
         <div className="flex items-center gap-1.5 shrink-0">
-          {student?.logoUrl && (
-            <img src={student.logoUrl} alt="Global Up" className="w-9 h-9 rounded-full object-cover shrink-0" style={{ border: "2px solid rgba(255,255,255,0.6)" }} />
-          )}
           {!screen && (student?.notifications || []).length > 0 && (
             <button onClick={() => openScreen("notices")} className="relative w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform" style={GLASS_BTN} aria-label={t("notices_title")}>
               <Bell size={17} />
@@ -3059,7 +3075,7 @@ export default function ParentApp() {
       {!student ? (
         <div className="relative px-4"><EmptyState text={t("empty_student")} /></div>
       ) : (
-        <div className="relative px-4" style={{ paddingTop: tab === "home" && !screen ? 0 : 26 }}>
+        <div className="relative px-4" style={{ paddingTop: tab === "home" && !screen ? 0 : 30 }}>
           {tab === "home" && !screen && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onRequestService={handleRequestService} onOpenScreen={openScreen} />}
           {tab === "home" && screen === "homework" && <HomeworkScreen student={student} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onSubmitQuiz={handleSubmitQuiz} />}
           {tab === "home" && screen === "progress" && <ProgressScreen student={student} t={t} lang={lang} />}
