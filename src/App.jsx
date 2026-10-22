@@ -56,7 +56,7 @@ const {
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v21";
+const APP_VERSION = "v24";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
 
@@ -445,7 +445,8 @@ function ProgressCard({ log, generalGrades = [], materials = [], homework = [], 
   // Сколько заданий из выданных хотя бы раз были сданы (не важно, проверены уже или нет).
   // Считаем ЗАКРЫТЫЕ ДЗ (сдано и, если был мини-тест, тест сдан). Для старых записей без поля closed — как раньше, по факту сдачи.
   const submittedMaterialIds = new Set(homework.filter((h) => h.closed !== false).map((h) => h.materialId).filter(Boolean));
-  const homeworkPct = materials.length ? Math.round((materials.filter((m) => submittedMaterialIds.has(m.id)).length / materials.length) * 100) : null;
+  const issued = materials.filter((m) => !m.archived);
+  const homeworkPct = issued.length ? Math.round((issued.filter((m) => submittedMaterialIds.has(m.id)).length / issued.length) * 100) : null;
 
   // Простой средний показатель: посещаемость + сданные ДЗ + оценки, без сложных весов —
   // берём среднее по тем показателям, по которым вообще есть данные (если задания ещё не
@@ -1156,7 +1157,9 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, onOpenLesson, 
         <HomeworkStatusCard key={h.id} h={h} isLatest={i === 0} t={t} locale={locale} onOpenLesson={onOpenLesson} />
       ))}
 
-      {!expanded ? (
+      {material.archived ? (
+        mySubmissions.length === 0 ? null : <div className="text-[11.5px] text-center py-1" style={{ color: "var(--ink-3)" }}>{t("hw_archived_note")}</div>
+      ) : !expanded ? (
         <button onClick={() => setExpanded(true)} className="w-full text-[12.5px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5" style={latestNeedsRedo ? { background: RED, color: "#fff" } : { background: "var(--surface)", color: BLUE }}>
           <Upload size={14} />{latestNeedsRedo ? t("hw_submit_fixed") : mySubmissions.length > 0 ? t("homework_submit_again") : t("homework_submit")}
         </button>
@@ -1226,7 +1229,7 @@ function upcomingLessons(groups, now = new Date()) {
 function computeHomeworkTasks(student) {
   const since = Date.now() - 21 * 24 * 3600 * 1000;
   const allMaterials = student.materials || [];
-  const materials = [...allMaterials].filter((m) => new Date(m.date).getTime() >= since).sort((a, b) => new Date(b.date) - new Date(a.date));
+  const materials = [...allMaterials].filter((m) => !m.archived && new Date(m.date).getTime() >= since).sort((a, b) => new Date(b.date) - new Date(a.date));
   const subsOf = (mid) => (student.homework || []).filter((h) => h.materialId === mid).sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
   const isClosed = (h) => (h.closed !== undefined ? !!h.closed : (h.status === "reviewed" || h.status === "auto_accepted") && (!h.aiLesson || lessonState(h)?.done));
   const tasks = [];
@@ -1259,7 +1262,8 @@ function homeBadgeCount(student) {
   if (!student) return 0;
   const tasks = computeHomeworkTasks(student).filter((x) => x.kind === "submit" || x.kind === "redo" || x.kind === "quiz").length;
   const blocked = (student.admission || []).filter((a) => a.blocked).length;
-  return tasks + blocked;
+  const tests = (student.tests || []).filter((x) => x.canStart && ["new", "in_progress", "retake"].includes(x.status)).length;
+  return tasks + blocked + tests;
 }
 
 function IconTile({ icon: Icon, bg, color, size = 38, iconSize = 19, radius = 13 }) {
@@ -1334,6 +1338,771 @@ function SectionLabel({ children, className = "" }) {
   return <div className={`text-[12px] font-bold uppercase tracking-[0.07em] px-1 mb-2.5 ${className}`} style={{ color: "var(--ink-3)" }}>{children}</div>;
 }
 
+// =============================== ТЕСТЫ ПО ЮНИТАМ ===============================
+// Учитель открывает тест группе → ученик проходит его по упражнениям (у каждого — объяснение, что
+// делать) → сервер проверяет и считает баллы → отдельный экран результата. Проходной — 80%.
+// Не сдал — повторяет материал (правила + свои ошибки) и пересдаёт; всего 3 попытки.
+// Меньше 50% — пересдача откроется после повторного занятия с учителем.
+async function miniAppRequest(initData, phone, password, extra, timeoutMs = 20000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let curLang = "ru";
+  try { curLang = localStorage.getItem("gu_lang") || "ru"; } catch {}
+  try {
+    const res = await fetch(EDGE_FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+      body: JSON.stringify({ initData, phone, password, ...extra }),
+      signal: controller.signal,
+    });
+    return await res.json();
+  } catch (e) {
+    if (e.name === "AbortError") return { error: translate(curLang, "server_timeout") };
+    return { error: translate(curLang, "server_unreachable", { msg: String(e?.message || e) }) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+const TEST_TONE = { new: "blue", in_progress: "purple", retake: "yellow", needs_teacher: "red", checking: "blue", passed: "green", failed_final: "red" };
+function testGradeFromPct(pct) { return pct >= 90 ? 5 : pct >= 80 ? 4 : pct >= 60 ? 3 : 2; }
+function fmtClock(sec) {
+  const s = Math.max(0, Math.round(sec || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+}
+function fmtMinutes(sec, t) {
+  const m = Math.max(1, Math.round((sec || 0) / 60));
+  return t("test_minutes", { n: m });
+}
+function sectionItems(section) {
+  return Array.isArray(section.parts) ? section.parts.flatMap((p) => p.items || []) : section.items || [];
+}
+function isAnswered(section, item, answers) {
+  if (item.example) return true;
+  const v = answers?.[section.id]?.[item.id];
+  if (section.type === "choice") return v !== undefined && v !== null;
+  return String(v ?? "").trim() !== "";
+}
+function countUnanswered(test, answers) {
+  let n = 0;
+  for (const s of test.sections || []) {
+    if (s.type === "writing") { if (String(answers?.[s.id]?.text || "").trim().split(/\s+/).filter(Boolean).length < 3) n++; continue; }
+    for (const it of sectionItems(s)) if (!isAnswered(s, it, answers)) n++;
+  }
+  return n;
+}
+function sectionDone(section, answers) {
+  if (section.type === "writing") return String(answers?.[section.id]?.text || "").trim().split(/\s+/).filter(Boolean).length >= 3;
+  return sectionItems(section).every((it) => isAnswered(section, it, answers));
+}
+const testHelp = (obj, lang) => (obj ? obj[lang] || obj.ru || "" : "");
+
+// ---------- Поля ввода ----------
+function GapInput({ value, onChange, onFocus, disabled, width = 120, focused }) {
+  return (
+    <input
+      value={value || ""}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={onFocus}
+      disabled={disabled}
+      autoCapitalize="none"
+      autoCorrect="off"
+      autoComplete="off"
+      spellCheck={false}
+      className="inline-block align-baseline mx-0.5 px-2 py-1 rounded-lg outline-none font-semibold text-center"
+      style={{ width, background: disabled ? "var(--surface-alt)" : "var(--soft-blue-bg)", color: disabled ? "var(--ink-2)" : "var(--ink)", border: `1.5px solid ${focused ? BLUE : "transparent"}`, fontSize: 16 }}
+    />
+  );
+}
+function OptionPill({ text, selected, onClick, disabled }) {
+  return (
+    <button onClick={onClick} disabled={disabled} className="px-3 py-2 rounded-xl text-[14px] font-semibold transition-colors active:scale-95"
+      style={{ background: selected ? BLUE : "var(--surface-soft)", color: selected ? "#fff" : "var(--ink)", border: `1.5px solid ${selected ? BLUE : "var(--line)"}`, opacity: disabled && !selected ? 0.5 : 1 }}>
+      {text}
+    </button>
+  );
+}
+
+// Одно упражнение. answersS — ответы этого упражнения { itemId: value }, setItem(itemId, value).
+function TestSection({ section, answersS, setItem, lang, t, focus, setFocus }) {
+  const s = section;
+  const usedValues = new Set(Object.values(answersS || {}).map((v) => String(v || "").trim().toLowerCase()).filter(Boolean));
+  (s.bankUsed || []).forEach((w) => usedValues.add(String(w).toLowerCase()));
+  const items = sectionItems(s);
+  const fillFromBank = (word) => {
+    haptic("light");
+    const target = focus && focus.sid === s.id && items.find((it) => it.id === focus.iid && !it.example)
+      ? focus.iid
+      : (items.find((it) => !it.example && !String(answersS?.[it.id] ?? "").trim()) || {}).id;
+    // «must (x3)» в рамке — вставляем только само слово
+    if (target) setItem(target, String(word).replace(/\s*\(x\d+\)\s*$/i, ""));
+  };
+  // Поле растёт под длину ответа (длинные фразы из рамки не обрезаются).
+  const autoW = (it, base) => {
+    const v = String((it.example ? it.answer : answersS?.[it.id]) || "");
+    return Math.min(300, Math.max(base, Math.round(v.length * 8.6) + 26));
+  };
+  const gapProps = (it) => ({
+    value: it.example ? it.answer : answersS?.[it.id],
+    disabled: !!it.example,
+    focused: focus && focus.sid === s.id && focus.iid === it.id,
+    onFocus: () => setFocus({ sid: s.id, iid: it.id }),
+    onChange: (v) => setItem(it.id, v),
+  });
+
+  return (
+    <div className="space-y-3">
+      {s.image && (
+        <div className="rounded-[18px] p-2" style={{ background: "#fff", boxShadow: "0 2px 10px rgba(26,26,23,0.05)" }}>
+          <img src={s.image} alt="" className="w-full rounded-xl object-contain" style={{ maxHeight: 340 }} />
+        </div>
+      )}
+      {s.reading && (
+        <div className="rounded-[18px] p-3.5 text-[14.5px] leading-relaxed whitespace-pre-line" style={{ background: "var(--soft-yellow-bg-2)", border: "1px solid var(--soft-yellow-border)", color: "var(--ink)" }}>{s.reading}</div>
+      )}
+      {Array.isArray(s.bank) && s.bank.length > 0 && (
+        <div className="rounded-[18px] p-3" style={{ background: "var(--surface)", border: "1px dashed var(--line)" }}>
+          <div className="text-[11px] font-bold uppercase tracking-[0.06em] mb-2" style={{ color: "var(--ink-3)" }}>{t("test_bank")}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {s.bank.map((w, i) => {
+              const used = !s.bankReusable && usedValues.has(String(w).toLowerCase());
+              return (
+                <button key={i} onClick={() => fillFromBank(w)} className="px-2.5 py-1.5 rounded-lg text-[13.5px] font-semibold active:scale-95 transition-transform"
+                  style={{ background: used ? "var(--surface-alt)" : "var(--soft-blue-bg)", color: used ? "var(--ink-3)" : "var(--soft-blue-fg)", textDecoration: used ? "line-through" : "none" }}>
+                  {w}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {s.type === "picture" && (
+        <div className="grid grid-cols-2 gap-2.5">
+          {items.map((it) => (
+            <div key={it.id} className="rounded-[18px] p-2.5" style={{ background: "var(--surface)", boxShadow: "0 2px 10px rgba(26,26,23,0.05)" }}>
+              <img src={it.image} alt="" className="w-full aspect-square object-contain rounded-xl" style={{ background: "#fff" }} />
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className="text-[12px] font-bold w-5 shrink-0" style={{ color: "var(--ink-3)" }}>{it.n}</span>
+                <GapInput {...gapProps(it)} width="100%" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {s.type === "gap" && (
+        <div className="space-y-2">
+          {items.map((it) => {
+            const parts = String(it.text || "").split("___");
+            return (
+              <div key={it.id} className="rounded-[16px] px-3.5 py-3 text-[15px] leading-[2.1]" style={{ background: "var(--surface)" }}>
+                <span className="text-[12px] font-bold mr-1.5" style={{ color: "var(--ink-3)" }}>{it.n}</span>
+                {parts.map((p, i) => (
+                  <React.Fragment key={i}>{p}{i < parts.length - 1 && <GapInput {...gapProps(it)} width={autoW(it, 96)} />}</React.Fragment>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {s.type === "gap_text" && (
+        <div className="rounded-[18px] p-4 text-[15px] leading-[2.3] whitespace-pre-line" style={{ background: "var(--surface)" }}>
+          {String(s.passage || "").split(/\{(\d+)\}/).map((chunk, i) => {
+            if (i % 2 === 0) return <React.Fragment key={i}>{chunk}</React.Fragment>;
+            const it = items.find((x) => String(x.n) === chunk);
+            if (!it) return null;
+            return (
+              <span key={i} className="whitespace-nowrap">
+                <sup className="text-[10px] font-bold" style={{ color: "var(--ink-3)" }}>{it.n}</sup>
+                <GapInput {...gapProps(it)} width={autoW(it, 104)} />
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {s.type === "choice" && (Array.isArray(s.parts) ? s.parts : [{ items: s.items }]).map((part, pi) => (
+        <div key={pi} className="space-y-2">
+          {Array.isArray(part.passage) && (
+            <div className="rounded-[18px] p-3.5 text-[14.5px] leading-relaxed space-y-1" style={{ background: "var(--soft-yellow-bg-2)", border: "1px solid var(--soft-yellow-border)" }}>
+              {part.passage.map((line, li) => <div key={li}>{line}</div>)}
+            </div>
+          )}
+          {(part.items || []).map((it) => {
+            const val = it.example ? it.options.indexOf(it.answer) : answersS?.[it.id];
+            const textParts = it.text ? String(it.text).split("___") : null;
+            return (
+              <div key={it.id} data-item={it.id} className="rounded-[16px] px-3.5 py-3" style={{ background: "var(--surface)" }}>
+                {it.image && <img src={it.image} alt="" className="w-28 h-20 object-contain rounded-lg mb-2" style={{ background: "#fff" }} />}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[12px] font-bold w-5 shrink-0" style={{ color: "var(--ink-3)" }}>{it.n}</span>
+                  {textParts && (
+                    <span className="text-[15px] mr-1">
+                      {textParts.map((p, i) => <React.Fragment key={i}>{p}{i < textParts.length - 1 && <b style={{ color: val !== undefined && val !== null ? BLUE : "var(--ink-3)" }}>{val !== undefined && val !== null && val >= 0 ? it.options[val] : "___"}</b>}</React.Fragment>)}
+                    </span>
+                  )}
+                  <div className="flex flex-wrap gap-1.5">
+                    {it.options.map((opt, oi) => (
+                      <OptionPill key={oi} text={opt} selected={val === oi} disabled={!!it.example} onClick={() => { haptic("light"); setItem(it.id, oi); }} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+
+      {s.type === "match" && (
+        <>
+          <div className="rounded-[18px] p-3.5 space-y-1.5" style={{ background: "var(--soft-yellow-bg-2)", border: "1px solid var(--soft-yellow-border)" }}>
+            {(s.options || []).map((o) => (
+              <div key={o.key} className="flex gap-2 text-[14px]"><b className="w-4 shrink-0" style={{ color: "#B45309" }}>{o.key}</b><span>{o.text}</span></div>
+            ))}
+          </div>
+          {items.map((it) => {
+            const val = it.example ? it.answer : answersS?.[it.id];
+            const takenByOthers = new Set(items.filter((x) => x.id !== it.id).map((x) => (x.example ? x.answer : answersS?.[x.id])).filter(Boolean));
+            const opt = (s.options || []).find((o) => o.key === val);
+            return (
+              <div key={it.id} data-item={it.id} className="rounded-[16px] px-3.5 py-3" style={{ background: "var(--surface)" }}>
+                <div className="text-[15px] font-semibold"><span className="text-[12px] font-bold mr-1.5" style={{ color: "var(--ink-3)" }}>{it.n}</span>{it.text}</div>
+                <div className="text-[12.5px] mt-0.5 min-h-[18px]" style={{ color: opt ? BLUE : "var(--ink-3)" }}>{opt ? `→ ${opt.text}` : t("test_pick_letter")}</div>
+                <div className="grid gap-1 mt-2" style={{ gridTemplateColumns: `repeat(${Math.min(9, (s.options || []).length)}, minmax(0, 1fr))` }}>
+                  {(s.options || []).map((o) => (
+                    <button key={o.key} disabled={!!it.example} onClick={() => { haptic("light"); setItem(it.id, val === o.key ? "" : o.key); }}
+                      className="h-9 rounded-xl text-[14px] font-bold active:scale-95 transition-transform"
+                      style={{ background: val === o.key ? BLUE : "var(--surface-soft)", color: val === o.key ? "#fff" : takenByOthers.has(o.key) ? "var(--ink-3)" : "var(--ink)", border: `1.5px solid ${val === o.key ? BLUE : "var(--line)"}` }}>
+                      {o.key}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {s.type === "vocab" && (
+        <div className="space-y-2">
+          {items.map((it, idx) => (
+            <div key={it.id} className="rounded-[16px] px-3.5 py-3" style={{ background: "var(--surface)" }}>
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-[12px] font-bold w-6 shrink-0" style={{ color: "var(--ink-3)" }}>{it.n}</span>
+                <span className="text-[16px] font-bold">{it.prompt}</span>
+                {it.hint && <span className="text-[12px]" style={{ color: "var(--ink-sub)" }}>{it.hint}</span>}
+              </div>
+              <input
+                data-vocab-idx={idx}
+                value={answersS?.[it.id] || ""}
+                onChange={(e) => setItem(it.id, e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const next = document.querySelector(`[data-vocab-idx="${idx + 1}"]`); if (next) next.focus(); else e.currentTarget.blur(); } }}
+                lang={s.dir === "ru" ? "ru" : "en"}
+                enterKeyHint="next"
+                autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false}
+                placeholder={s.dir === "ru" ? t("vocab_ph_ru") : t("vocab_ph_en")}
+                className="mt-2 w-full px-3 py-2.5 rounded-xl outline-none font-semibold"
+                style={{ background: "var(--soft-blue-bg)", color: "var(--ink)", border: "1.5px solid transparent", fontSize: 16 }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {s.type === "write" && (
+        <div className="space-y-2">
+          {items.map((it) => {
+            const tr = s.mode === "tr";
+            const val = it.example ? it.answer : answersS?.[it.id];
+            return (
+              <div key={it.id} className="rounded-[16px] px-3.5 py-3" style={{ background: "var(--surface)" }}>
+                <div className="flex gap-2 text-[15px] leading-snug items-start">
+                  <span className="text-[12px] font-bold w-5 shrink-0 pt-0.5" style={{ color: "var(--ink-3)" }}>{it.n}</span>
+                  {it.image && <img src={it.image} alt="" className="w-24 h-20 object-contain rounded-lg shrink-0" style={{ background: "#fff" }} />}
+                  <span className="min-w-0" style={{ color: "var(--ink-2)" }}>{it.text}</span>
+                </div>
+                <textarea
+                  value={val || ""}
+                  disabled={!!it.example}
+                  onChange={(e) => setItem(it.id, e.target.value.replace(/\n/g, " "))}
+                  onFocus={() => setFocus({ sid: s.id, iid: it.id })}
+                  rows={Math.max(tr ? 2 : 1, Math.ceil(String(val || "").length / 30))}
+                  lang={tr ? "ru" : "en"}
+                  autoCapitalize="sentences"
+                  autoCorrect="off"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={tr ? t("test_tr_placeholder") : it.open ? t("test_open_placeholder") : t("test_en_placeholder")}
+                  className="w-full mt-2 rounded-xl px-3 py-2.5 outline-none leading-snug resize-none font-semibold"
+                  style={{ background: it.example ? "var(--surface-alt)" : "var(--soft-blue-bg)", color: it.example ? "var(--ink-2)" : "var(--ink)", border: `1.5px solid ${focus && focus.sid === s.id && focus.iid === it.id ? BLUE : "transparent"}`, fontSize: 16, minHeight: tr ? 64 : 46 }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {s.type === "writing" && (
+        <div className="rounded-[18px] p-3" style={{ background: "var(--surface)" }}>
+          <textarea
+            value={answersS?.text || ""}
+            onChange={(e) => setItem("text", e.target.value)}
+            rows={9}
+            autoCapitalize="sentences"
+            spellCheck={false}
+            placeholder={t("test_writing_placeholder")}
+            className="w-full rounded-xl p-3 outline-none leading-relaxed"
+            style={{ background: "var(--surface-soft)", border: "1px solid var(--line)", color: "var(--ink)", fontSize: 16 }}
+          />
+          <div className="text-[11.5px] mt-1.5 text-right" style={{ color: "var(--ink-3)" }}>{t("test_words", { n: String(answersS?.text || "").trim().split(/\s+/).filter(Boolean).length })}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- Прохождение теста (на весь экран) ----------
+function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
+  const no = info?.inProgress?.no || (info?.attempts?.length || 0) + 1;
+  const key = `gu_test_${studentId}_${info.groupId}_${test.id}_${no}`;
+  const saved0 = useMemo(() => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; } }, []);
+  const [answers, setAnswers] = useState(saved0?.answers || {});
+  const [si, setSi] = useState(saved0?.si || 0);
+  const [activeSec, setActiveSec] = useState(saved0?.activeSec || 0);
+  const [focus, setFocus] = useState(null);
+  const [confirm, setConfirm] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const scrollRef = useRef(null);
+  const hydrated = useRef(!!saved0);
+  const sections = test.sections || [];
+  const s = sections[si];
+
+  // Прогресс — на телефоне и в облаке Telegram: вышел посреди теста — продолжит с того же места.
+  useEffect(() => {
+    if (hydrated.current) return;
+    storageGet(key).then((raw) => {
+      if (hydrated.current || !raw) return;
+      try { const p = JSON.parse(raw); hydrated.current = true; setAnswers(p.answers || {}); setSi(p.si || 0); setActiveSec(p.activeSec || 0); } catch {}
+    });
+  }, []);
+  useEffect(() => {
+    const id = setInterval(() => { if (document.visibilityState === "visible") setActiveSec((x) => x + 1); }, 1000);
+    return () => clearInterval(id);
+  }, []);
+  const saveRef = useRef(0);
+  useEffect(() => {
+    hydrated.current = true;
+    const now = Date.now();
+    if (now - saveRef.current < 4000 && activeSec % 5 !== 0) { try { localStorage.setItem(key, JSON.stringify({ answers, si, activeSec })); } catch {} return; }
+    saveRef.current = now;
+    storageSet(key, JSON.stringify({ answers, si, activeSec }));
+  }, [answers, si, activeSec]);
+  useEffect(() => { scrollRef.current?.scrollTo?.(0, 0); setFocus(null); }, [si]);
+  useEffect(() => { const prev = document.body.style.overflow; document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = prev; }; }, []);
+
+  const setItem = (iid, v) => setAnswers((a) => ({ ...a, [s.id]: { ...(a[s.id] || {}), [iid]: v } }));
+  const unanswered = countUnanswered(test, answers);
+  const doSubmit = async () => {
+    setConfirm(false);
+    setSubmitting(true);
+    const res = await onSubmit(answers, activeSec);
+    setSubmitting(false);
+    if (res) storageRemove(key);
+  };
+  const sectionPoints = (sec) => (sec.type === "writing" ? sec.maxPoints : (sectionItems(sec).filter((x) => !x.example).length * (sec.points || 1)));
+
+  return createPortal(
+    <div className={`${document.querySelector(".theme-dark") ? "theme-dark" : "theme-light"} fixed inset-0 z-[120] flex flex-col`} style={{ background: "var(--paper)", color: "var(--ink)" }}>
+      <div className="shrink-0 px-4 pb-3" style={{ background: "var(--surface)", borderBottom: "1px solid var(--line)", paddingTop: "calc(14px + var(--gu-safe-top, env(safe-area-inset-top, 0px)))" }}>
+        <div className="flex items-center gap-3 max-w-md mx-auto">
+          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }} aria-label={t("close")}><X size={16} /></button>
+          <div className="min-w-0 flex-1">
+            <div className="text-[15px] font-extrabold truncate">{test.title}</div>
+            <div className="text-[11.5px]" style={{ color: "var(--ink-sub)" }}>{t("test_attempt_n", { n: no, m: info.maxAttempts || 3 })}</div>
+          </div>
+          <div className="flex items-center gap-1 text-[13px] font-bold px-2.5 py-1.5 rounded-full mono" style={{ background: "var(--surface-alt)" }}><Clock size={13} />{fmtClock(activeSec)}</div>
+        </div>
+        <div className="flex gap-1 mt-3 max-w-md mx-auto">
+          {sections.map((sec, i) => (
+            <button key={sec.id} onClick={() => setSi(i)} className="flex-1 h-7 rounded-lg text-[11.5px] font-bold transition-colors"
+              style={{ background: i === si ? BLUE : sectionDone(sec, answers) ? "var(--soft-green-bg)" : "var(--surface-alt)", color: i === si ? "#fff" : sectionDone(sec, answers) ? "var(--soft-green-fg)" : "var(--ink-2)" }}>
+              {i + 1}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+        <div className="max-w-md mx-auto space-y-3">
+          <div>
+            <div className="flex items-center justify-between">
+              <div className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--ink-3)" }}>{t("test_exercise_n", { n: si + 1, m: sections.length })}</div>
+              <Chip tone="blue">{s.type === "vocab" ? t("test_words_n", { n: sectionItems(s).length }) : t("test_points_n", { n: sectionPoints(s) })}</Chip>
+            </div>
+            <div className="text-[17px] font-extrabold leading-snug mt-1.5">{s.title}</div>
+            {testHelp(s.help, lang) && (
+              <div className="mt-2.5 p-3 rounded-[16px] text-[13px] leading-relaxed flex gap-2" style={{ background: "var(--soft-purple-bg)", color: "var(--soft-purple-fg)" }}>
+                <Lightbulb size={16} className="shrink-0 mt-0.5" /><span>{testHelp(s.help, lang)}</span>
+              </div>
+            )}
+          </div>
+          <TestSection key={s.id} section={s} answersS={answers[s.id] || {}} setItem={setItem} lang={lang} t={t} focus={focus} setFocus={setFocus} />
+        </div>
+      </div>
+
+      <div className="shrink-0 px-4 pt-3" style={{ background: "var(--surface)", borderTop: "1px solid var(--line)", paddingBottom: "calc(12px + var(--gu-safe-bottom, env(safe-area-inset-bottom, 0px)))" }}>
+        <div className="max-w-md mx-auto flex gap-2">
+          <button onClick={() => setSi(Math.max(0, si - 1))} disabled={si === 0} className="px-4 py-3.5 rounded-2xl text-[14px] font-semibold disabled:opacity-40" style={{ background: "var(--surface-alt)" }}><ChevronLeft size={18} /></button>
+          {si < sections.length - 1 ? (
+            <button onClick={() => setSi(si + 1)} className="flex-1 py-3.5 rounded-2xl text-[15px] font-bold text-white flex items-center justify-center gap-1" style={{ background: BLUE }}>{t("quiz_next")}<ChevronRight size={18} /></button>
+          ) : (
+            <button onClick={() => setConfirm(true)} disabled={submitting} className="flex-1 py-3.5 rounded-2xl text-[15px] font-bold text-white flex items-center justify-center gap-2" style={{ background: GREEN_D }}>
+              {submitting ? <Loader2 size={17} className="animate-spin" /> : <Check size={18} />}{submitting ? t("test_checking") : t("test_submit")}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {confirm && (
+        <div className="fixed inset-0 z-[130] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.45)" }} onClick={() => setConfirm(false)}>
+          <div className="anim-pop w-full max-w-md rounded-t-3xl p-6" style={{ background: "var(--surface)", paddingBottom: "calc(24px + var(--gu-safe-bottom, 0px))" }} onClick={(e) => e.stopPropagation()}>
+            <div className="text-[17px] font-extrabold">{t("test_confirm_title")}</div>
+            <div className="text-[13.5px] mt-1.5" style={{ color: "var(--ink-2)" }}>{unanswered > 0 ? t("test_confirm_unanswered", { n: unanswered }) : t("test_confirm_all")}</div>
+            <div className="text-[12.5px] mt-1" style={{ color: "var(--ink-sub)" }}>{t("test_time_spent", { time: fmtClock(activeSec) })}</div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setConfirm(false)} className="flex-1 py-3.5 rounded-2xl text-[14px] font-semibold" style={{ background: "var(--surface-alt)" }}>{t("test_back_to_test")}</button>
+              <button onClick={doSubmit} className="flex-1 py-3.5 rounded-2xl text-[14px] font-bold text-white" style={{ background: GREEN_D }}>{t("test_submit")}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {submitting && (
+        <div className="fixed inset-0 z-[140] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.35)" }}>
+          <div className="rounded-3xl px-6 py-5 flex items-center gap-3 text-[14px] font-semibold" style={{ background: "var(--surface)" }}><Loader2 size={20} className="animate-spin" style={{ color: BLUE }} />{t("test_checking_long")}</div>
+        </div>
+      )}
+    </div>,
+    document.body
+  );
+}
+
+// Текст вопроса для разбора ошибок.
+function reviewItemLabel(section, item) {
+  if (!item) return "";
+  if (section.type === "vocab") return item.prompt;
+  if (section.type === "gap" || section.type === "choice") return item.text || (section.parts ? `(${item.n})` : "");
+  if (section.type === "match") return item.text;
+  if (section.type === "gap_text") return `(${item.n})`;
+  if (section.type === "write") return item.text;
+  return "";
+}
+function givenText(section, item, given) {
+  if (given === null || given === undefined || given === "") return null;
+  if (section.type === "choice") return item?.options?.[given] ?? String(given);
+  if (section.type === "match") { const o = (section.options || []).find((x) => x.key === given); return o ? `${given} — ${o.text}` : String(given); }
+  return String(given);
+}
+
+// ---------- Экран результата + повторение материала ----------
+function TestResultView({ test, result, info, lang, t, onClose, onRetake }) {
+  const [mode, setMode] = useState("result"); // result | restudy
+  const [openSec, setOpenSec] = useState(null);
+  const scrollRef = useRef(null);
+  useEffect(() => { scrollRef.current?.scrollTo?.(0, 0); }, [mode]);
+  useEffect(() => { const prev = document.body.style.overflow; document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = prev; }; }, []);
+  const sections = test.sections || [];
+  const secById = Object.fromEntries(sections.map((s) => [s.id, s]));
+  const itemOf = (sid, iid) => sectionItems(secById[sid] || {}).find((x) => x.id === iid);
+  const status = result.status;
+  const passed = status === "passed";
+  const pct = result.pct || 0;
+  const color = passed ? GREEN_D : status === "checking" ? BLUE : pct < 50 ? RED_D : BRICK;
+  // пункты, которые ещё проверяет учитель, ошибками не показываем
+  const mistakes = (result.review || []).filter((r) => !r.correct && !r.needsTeacher);
+  const attemptsLeft = Math.max(0, (info?.maxAttempts || 3) - (info?.attempts?.length || result.no || 1));
+  const canRetake = info?.canStart && (status === "retake" || (status === "needs_teacher" && info?.restudyDoneAt));
+  const statusText = {
+    passed: t("test_res_passed"), retake: t("test_res_retake", { p: result.passPct || 80 }), needs_teacher: t("test_res_needs_teacher"),
+    checking: t("test_res_checking"), failed_final: t("test_res_failed_final"),
+  }[status] || "";
+  const r = 54, c = 2 * Math.PI * r;
+  const writing = result.writing;
+  const secWithMistakes = sections.filter((s) => (result.sections || []).some((x) => x.id === s.id && x.got < x.max));
+
+  return createPortal(
+    <div className={`${document.querySelector(".theme-dark") ? "theme-dark" : "theme-light"} fixed inset-0 z-[125] flex flex-col`} style={{ background: "var(--paper)", color: "var(--ink)" }}>
+      <div className="shrink-0 px-4 pb-3" style={{ background: "var(--surface)", borderBottom: "1px solid var(--line)", paddingTop: "calc(14px + var(--gu-safe-top, env(safe-area-inset-top, 0px)))" }}>
+        <div className="flex items-center gap-3 max-w-md mx-auto">
+          <button onClick={mode === "restudy" ? () => setMode("result") : onClose} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }}>{mode === "restudy" ? <ChevronLeft size={18} /> : <X size={16} />}</button>
+          <div className="min-w-0 flex-1">
+            <div className="text-[15px] font-extrabold truncate">{mode === "restudy" ? t("test_restudy_title") : t("test_result_title")}</div>
+            <div className="text-[11.5px] truncate" style={{ color: "var(--ink-sub)" }}>{test.title} · {t("test_attempt_n", { n: result.no, m: info?.maxAttempts || 3 })}</div>
+          </div>
+        </div>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-5">
+        <div className="max-w-md mx-auto space-y-3">
+          {mode === "result" && (
+            <>
+              <div className="rounded-[26px] p-5 text-center" style={{ background: "var(--surface)", boxShadow: "0 6px 20px rgba(26,26,23,0.07)" }}>
+                <div className="relative mx-auto" style={{ width: 132, height: 132 }}>
+                  <svg width="132" height="132" style={{ transform: "rotate(-90deg)" }}>
+                    <circle cx="66" cy="66" r={r} stroke="var(--surface-alt)" strokeWidth="12" fill="none" />
+                    <circle cx="66" cy="66" r={r} stroke={color} strokeWidth="12" fill="none" strokeDasharray={c} strokeDashoffset={c - (Math.min(100, pct) / 100) * c} strokeLinecap="round" />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <div className="text-[30px] font-black leading-none" style={{ color }}>{result.score}</div>
+                    <div className="text-[12px] font-semibold mt-1" style={{ color: "var(--ink-3)" }}>{t("test_of_max", { m: result.max })}</div>
+                  </div>
+                </div>
+                <div className="text-[19px] font-extrabold mt-3" style={{ color }}>{passed ? t("test_passed_big") : status === "checking" ? t("test_checking_big") : t("test_failed_big")}</div>
+                <div className="text-[13px] mt-1.5 leading-relaxed" style={{ color: "var(--ink-2)" }}>{statusText}</div>
+                <div className="flex justify-center gap-2 mt-3 flex-wrap">
+                  <Chip tone="neutral"><Clock size={12} />{fmtClock(result.activeSec)}</Chip>
+                  <Chip tone="neutral">{pct}%</Chip>
+                  {(passed || status === "failed_final") && <Chip tone={passed ? "green" : "red"}><Star size={12} />{t("test_grade_n", { n: testGradeFromPct(pct) })}</Chip>}
+                </div>
+              </div>
+
+              <PlainCard className="pb-2">
+                <CardTitle>{t("test_by_exercise")}</CardTitle>
+                {(result.sections || []).map((x, i) => {
+                  const sec = secById[x.id];
+                  const full = x.got === x.max;
+                  return (
+                    <div key={x.id} className="py-2.5" style={{ borderBottom: i === result.sections.length - 1 ? "none" : "1px solid var(--line)" }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[13.5px] font-semibold min-w-0 truncate">{i + 1}. {sec?.title}</div>
+                        <div className="text-[13.5px] font-extrabold shrink-0" style={{ color: full ? GREEN_D : x.got === 0 ? RED_D : BRICK }}>{x.got}/{x.max}</div>
+                      </div>
+                      <div className="h-1.5 rounded-full mt-1.5 overflow-hidden" style={{ background: "var(--surface-alt)" }}><div className="h-full rounded-full" style={{ width: `${x.max ? (x.got / x.max) * 100 : 0}%`, background: full ? GREEN_D : BRICK }} /></div>
+                    </div>
+                  );
+                })}
+              </PlainCard>
+
+              {writing && (
+                <PlainCard className="pb-4">
+                  <CardTitle right={writing.pending ? <Chip tone="blue">{t("test_writing_pending_chip")}</Chip> : <Chip tone="purple">{writing.points}/{writing.max}</Chip>}>{t("test_writing_title")}</CardTitle>
+                  {writing.pending ? <p className="text-[13px]" style={{ color: "var(--ink-2)" }}>{t("test_writing_pending")}</p> : (
+                    <>
+                      {writing.feedback && <p className="text-[13.5px] leading-relaxed">{writing.feedback}</p>}
+                      {writing.teacherComment && <p className="text-[13px] mt-2 p-2.5 rounded-xl" style={{ background: "var(--soft-green-bg)" }}><MessageCircle size={13} className="inline -mt-0.5 mr-1" />{writing.teacherComment}</p>}
+                      {(writing.corrections || []).length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {writing.corrections.map((cr, i) => <div key={i} className="text-[13px]"><span className="line-through" style={{ color: BRICK }}>{cr.wrong}</span> → <b style={{ color: GREEN_D }}>{cr.right}</b></div>)}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </PlainCard>
+              )}
+
+              {mistakes.length > 0 && (
+                <PlainCard className="pb-3">
+                  <CardTitle right={<Chip tone="red">{mistakes.length}</Chip>}>{t("test_mistakes")}</CardTitle>
+                  {sections.filter((s) => mistakes.some((m) => m.sectionId === s.id)).map((s) => {
+                    const list = mistakes.filter((m) => m.sectionId === s.id);
+                    const open = openSec === s.id;
+                    return (
+                      <div key={s.id} className="py-1" style={{ borderTop: "1px solid var(--line)" }}>
+                        <button onClick={() => setOpenSec(open ? null : s.id)} className="w-full flex items-center justify-between py-2 text-left">
+                          <span className="text-[13.5px] font-semibold">{t("test_exercise_short", { n: sections.indexOf(s) + 1 })} · {list.length}</span>
+                          <ChevronDownIcon size={16} style={{ transform: open ? "rotate(180deg)" : "none", color: "var(--ink-3)" }} />
+                        </button>
+                        {open && (
+                          <div className="space-y-2 pb-2">
+                            {list.map((m) => {
+                              const it = itemOf(m.sectionId, m.itemId);
+                              const given = givenText(s, it, m.given);
+                              return (
+                                <div key={m.itemId} className="p-3 rounded-[14px] flex gap-3" style={{ background: "var(--surface-soft)" }}>
+                                  {it?.image && <img src={it.image} alt="" className="w-14 h-14 rounded-lg object-contain shrink-0" style={{ background: "#fff" }} />}
+                                  <div className="min-w-0 text-[13px]">
+                                    <div className="font-semibold"><span style={{ color: "var(--ink-3)" }}>{it?.n}. </span>{reviewItemLabel(s, it)}</div>
+                                    <div className="mt-1"><span style={{ color: "var(--ink-sub)" }}>{t("quiz_your_answer")}: </span><b style={{ color: BRICK }}>{given ?? t("quiz_no_answer")}</b></div>
+                                    <div><span style={{ color: "var(--ink-sub)" }}>{s.type === "write" && !m.aiRight ? t("test_sample") : t("quiz_correct_answer")}: </span><b style={{ color: GREEN_D }}>{m.aiRight || m.correctAnswer}</b></div>
+                                    {m.got > 0 && <div className="text-[12px] mt-0.5" style={{ color: "var(--ink-sub)" }}>{t("test_part_points", { n: m.got, m: m.max })}</div>}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </PlainCard>
+              )}
+            </>
+          )}
+
+          {mode === "restudy" && (
+            <>
+              <div className="p-3.5 rounded-[18px] text-[13px] leading-relaxed" style={{ background: "var(--soft-purple-bg)", color: "var(--soft-purple-fg)" }}>{t("test_restudy_intro")}</div>
+              {secWithMistakes.map((s) => {
+                const list = mistakes.filter((m) => m.sectionId === s.id);
+                return (
+                  <PlainCard key={s.id} className="pb-4">
+                    <CardTitle>{t("test_exercise_short", { n: sections.indexOf(s) + 1 })}</CardTitle>
+                    <div className="text-[14px] font-bold">{s.title}</div>
+                    {testHelp(s.rule, lang) && (
+                      <div className="mt-2.5 p-3 rounded-[14px] text-[13.5px] leading-relaxed" style={{ background: "var(--soft-blue-bg)" }}>
+                        <div className="text-[11px] font-bold uppercase tracking-[0.06em] mb-1" style={{ color: "var(--soft-blue-fg)" }}><Pin size={12} className="inline -mt-0.5 mr-1" />{t("lesson_rule")}</div>
+                        {testHelp(s.rule, lang)}
+                      </div>
+                    )}
+                    {list.length > 0 && (
+                      <div className="mt-2.5 space-y-1.5">
+                        {list.map((m) => {
+                          const it = itemOf(m.sectionId, m.itemId);
+                          return (
+                            <div key={m.itemId} className="text-[13px]">
+                              <span style={{ color: "var(--ink-3)" }}>{it?.n}. </span>{reviewItemLabel(s, it) && <span>{reviewItemLabel(s, it)} </span>}
+                              <span className="line-through" style={{ color: BRICK }}>{givenText(s, it, m.given) || "—"}</span> → <b style={{ color: GREEN_D }}>{m.aiRight || m.correctAnswer}</b>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {s.type === "writing" && writing?.feedback && <p className="text-[13px] mt-2">{writing.feedback}</p>}
+                  </PlainCard>
+                );
+              })}
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="shrink-0 px-4 pt-3" style={{ background: "var(--surface)", borderTop: "1px solid var(--line)", paddingBottom: "calc(12px + var(--gu-safe-bottom, env(safe-area-inset-bottom, 0px)))" }}>
+        <div className="max-w-md mx-auto space-y-2">
+          {mode === "result" && (passed || status === "checking" || status === "failed_final") && (
+            <button onClick={onClose} className="w-full py-3.5 rounded-2xl text-[15px] font-bold text-white" style={{ background: passed ? GREEN_D : BLUE }}>{t("quiz_done")}</button>
+          )}
+          {mode === "result" && (status === "retake" || status === "needs_teacher") && (
+            <>
+              {status === "needs_teacher" && !info?.restudyDoneAt && <div className="text-[12.5px] text-center" style={{ color: "var(--ink-2)" }}>{t("test_wait_teacher")}</div>}
+              <button onClick={() => setMode("restudy")} className="w-full py-3.5 rounded-2xl text-[15px] font-bold text-white flex items-center justify-center gap-2" style={{ background: BLUE }}><BookOpen size={17} />{t("test_restudy_btn")}</button>
+            </>
+          )}
+          {mode === "restudy" && (canRetake ? (
+            <button onClick={onRetake} className="w-full py-3.5 rounded-2xl text-[15px] font-bold text-white flex items-center justify-center gap-2" style={{ background: GREEN_D }}><RotateCcw size={17} />{t("test_retake_btn", { n: (result.no || 1) + 1, m: info?.maxAttempts || 3 })}</button>
+          ) : (
+            <div className="w-full py-3.5 rounded-2xl text-[13.5px] font-semibold text-center" style={{ background: "var(--surface-alt)", color: "var(--ink-2)" }}>{status === "needs_teacher" ? t("test_wait_teacher") : t("test_no_retakes")}</div>
+          ))}
+          {mode === "result" && attemptsLeft > 0 && status === "retake" && <div className="text-[11.5px] text-center" style={{ color: "var(--ink-sub)" }}>{t("test_attempts_left", { n: attemptsLeft })}</div>}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// ---------- Экран «Тесты» ----------
+function TestsScreen({ student, t, lang, api }) {
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  const tests = student.tests || [];
+  const [busy, setBusy] = useState(null);
+  const [player, setPlayer] = useState(null); // { test, info }
+  const [view, setView] = useState(null); // { test, result, info }
+  const [err, setErr] = useState("");
+  const infoOf = (x) => (student.tests || []).find((y) => y.testId === x.testId && y.groupId === x.groupId) || x;
+
+  // Вышел посреди теста — при входе открываем его сразу.
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current) return;
+    const cur = tests.find((x) => x.inProgress && x.canStart);
+    resumedRef.current = true;
+    if (cur) start(cur);
+  }, []);
+
+  const start = async (x) => {
+    setErr(""); setBusy(x.testId + x.groupId);
+    const res = await api({ startTest: { studentId: student.id, groupId: x.groupId, testId: x.testId } });
+    setBusy(null);
+    if (res?.error) { setErr(res.error); return; }
+    if (res?.test && res.started) setPlayer({ test: res.test, info: infoOf(x), groupId: x.groupId });
+    else if (res?.test) openResult(x);
+  };
+  const openResult = async (x) => {
+    setErr(""); setBusy(x.testId + x.groupId);
+    const res = await api({ testReview: { studentId: student.id, groupId: x.groupId, testId: x.testId } });
+    setBusy(null);
+    if (res?.error) { setErr(res.error); return; }
+    setView({ test: res.test, result: res.testResult, key: x });
+  };
+  const submit = async (answers, activeSec) => {
+    const x = player.info;
+    const res = await api({ submitTest: { studentId: student.id, groupId: x.groupId, testId: x.testId, answers, activeSec, lang } }, 90000);
+    if (res?.error) { setErr(res.error); haptic("error"); return null; }
+    haptic(res.testResult?.status === "passed" ? "success" : "warning");
+    setPlayer(null);
+    setView({ test: player.test, result: res.testResult, key: x });
+    return res;
+  };
+
+  const todo = tests.filter((x) => !x.closed && ["new", "in_progress", "retake", "needs_teacher", "checking"].includes(x.status));
+  const done = tests.filter((x) => !todo.includes(x));
+  const renderCard = (x) => {
+    const best = (x.attempts || []).reduce((b, a) => (!b || a.pct > b.pct ? a : b), null);
+    const last = (x.attempts || [])[(x.attempts || []).length - 1];
+    const isBusy = busy === x.testId + x.groupId;
+    let btn = null;
+    if (x.canStart && x.inProgress) btn = { label: t("test_btn_continue"), act: () => start(x), color: PURPLE };
+    else if (x.canStart && x.status === "new") btn = { label: t("test_btn_start"), act: () => start(x), color: BLUE };
+    else if (x.canStart && (x.status === "retake" || x.status === "needs_teacher")) btn = { label: t("test_btn_retake"), act: () => openResult(x), color: BRICK };
+    else if ((x.attempts || []).length) btn = { label: t("test_btn_result"), act: () => openResult(x), color: "var(--ink-2)", ghost: true };
+    return (
+      <PlainCard key={x.testId + x.groupId} className="py-3.5">
+        <div className="flex items-start gap-3">
+          <IconTile icon={x.kind === "vocab" ? Pencil : ClipboardList} bg={x.kind === "vocab" ? "var(--soft-purple-bg)" : "var(--soft-blue-bg)"} color={x.kind === "vocab" ? PURPLE : BLUE} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[15px] font-extrabold leading-tight">{x.title}</div>
+            <div className="text-[11.5px] mt-0.5 truncate" style={{ color: "var(--ink-sub)" }}>{[x.bookTitle, t("test_pass_short", { p: x.passPct || 80 })].filter(Boolean).join(" · ")}</div>
+            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+              <Chip tone={TEST_TONE[x.status] || "neutral"}>{t(`test_st_${x.status}`)}</Chip>
+              {best && <Chip tone="neutral">{t("test_best", { s: best.score, m: best.max })}</Chip>}
+              {last && <Chip tone="neutral"><Clock size={11} />{fmtMinutes(last.activeSec, t)}</Chip>}
+              {(x.attempts || []).length > 0 && x.status !== "passed" && <Chip tone="neutral">{t("test_attempts_used", { n: x.attempts.length, m: x.maxAttempts || 3 })}</Chip>}
+            </div>
+            {x.status === "needs_teacher" && !x.restudyDoneAt && <div className="text-[12px] mt-2" style={{ color: "var(--soft-red-fg)" }}>{t("test_wait_teacher")}</div>}
+          </div>
+        </div>
+        {btn && (
+          <button onClick={btn.act} disabled={isBusy} className="w-full mt-3 py-2.5 rounded-xl text-[13.5px] font-bold flex items-center justify-center gap-1.5 active:scale-[0.98] transition-transform"
+            style={btn.ghost ? { background: "var(--surface-alt)", color: "var(--ink)" } : { background: btn.color, color: "#fff" }}>
+            {isBusy && <Loader2 size={15} className="animate-spin" />}{btn.label}
+          </button>
+        )}
+      </PlainCard>
+    );
+  };
+
+  return (
+    <div className="space-y-3 pt-1.5">
+      {err && <div className="p-3 rounded-[16px] text-[13px]" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>{err}</div>}
+      {tests.length === 0 && <PlainCard><EmptyState text={t("tests_empty")} icon={ClipboardList} /></PlainCard>}
+      {todo.length > 0 && <SectionLabel>{t("tests_todo")}</SectionLabel>}
+      {todo.map(renderCard)}
+      {done.length > 0 && <SectionLabel className="mt-4">{t("tests_done")}</SectionLabel>}
+      {done.map(renderCard)}
+      {player && <TestPlayer test={player.test} info={player.info} studentId={student.id} lang={lang} t={t} onClose={() => setPlayer(null)} onSubmit={submit} />}
+      {view && (
+        <TestResultView
+          test={view.test} result={view.result} info={infoOf(view.key)} lang={lang} t={t}
+          onClose={() => setView(null)}
+          onRetake={() => { const k = view.key; setView(null); start(infoOf(k)); }}
+        />
+      )}
+    </div>
+  );
+}
+
 // ------------------------------- Главная (минималистичная) -------------------------------
 // На главной — только самое нужное: деньги, ближайший урок, срочное, «Учёба» (ДЗ и прогресс — открываются
 // отдельным экраном) и «Сервис». Всё подробное (задания, посещаемость, группы, объявления) — на своих экранах.
@@ -1360,6 +2129,11 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
   const grades = [...log.filter((r) => r.grade).map((r) => r.grade), ...(student.generalGrades || []).map((g) => g.value)];
   const avg = grades.length ? (grades.reduce((a, b) => a + b, 0) / grades.length).toFixed(1) : null;
   const hwSub = actionable.length ? t("hw_sub_todo") : inProgress ? t("hw_sub_checking") : (student.materials || []).length ? t("hw_sub_done") : null;
+  const testsList = student.tests || [];
+  const testsTodo = testsList.filter((x) => x.canStart && ["new", "in_progress", "retake", "needs_teacher"].includes(x.status)).length;
+  const testsWaiting = testsList.some((x) => x.status === "checking" || (x.status === "needs_teacher" && !x.restudyDoneAt));
+  const testsAll = testsList.length;
+  const testsSub = testsTodo ? t("tests_sub_todo") : testsWaiting ? t("tests_sub_wait") : testsAll ? t("tests_sub_done") : t("tests_sub_none");
   const progSub = [attPct != null && `${attPct}%`, avg && `${t("avg_short")} ${avg}`].filter(Boolean).join(" · ") || null;
   const glass = { background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(8px)" };
 
@@ -1455,9 +2229,9 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
       <div className="grid grid-cols-3 gap-3">
         <SquareTile icon={BookOpen} tile="var(--soft-purple-bg)" color={PURPLE} title={t("homework_short")} sub={hwSub} onClick={() => onOpenScreen("homework")}
           badge={actionable.length > 0 ? <Chip tone="red">{actionable.length}</Chip> : inProgress > 0 ? <Loader2 size={15} className="animate-spin" style={{ color: BLUE }} /> : (student.materials || []).length ? <CheckCircle2 size={17} style={{ color: GREEN_D }} /> : null} />
+        <SquareTile icon={ClipboardList} tile="var(--soft-blue-bg)" color={BLUE} title={t("tests_title")} sub={testsSub} onClick={() => onOpenScreen("tests")}
+          badge={testsTodo > 0 ? <Chip tone="red">{testsTodo}</Chip> : testsAll > 0 && testsTodo === 0 && !testsWaiting ? <CheckCircle2 size={17} style={{ color: GREEN_D }} /> : null} />
         <SquareTile icon={TrendingUp} tile="var(--soft-green-bg)" color={GREEN_D} title={t("progress_short")} sub={progSub} onClick={() => onOpenScreen("progress")} />
-        <SquareTile icon={Bell} tile="var(--soft-yellow-bg)" color="#B45309" title={t("notices_title")} sub={notifications.length ? null : t("notices_none_short")} onClick={() => onOpenScreen("notices")}
-          badge={notifications.length > 0 ? <Chip tone="yellow">{notifications.length}</Chip> : null} />
       </div>
 
       {/* Сервис — тоже квадратные плитки */}
@@ -1482,6 +2256,27 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
 }
 
 // ------------------------------- Экран «Домашнее задание» -------------------------------
+// Архив проверенных ДЗ: все сдачи, по которым есть результат (проверил учитель, приняла или разобрала
+// нейросеть), сгруппированные по заданию, новые сверху. Не зависит от того, есть ли ещё само задание.
+function checkedHomeworkGroups(student) {
+  const isChecked = (h) => h.status === "reviewed" || h.status === "auto_accepted" || (h.aiStatus === "done" && h.aiReview) || !!h.teacherComment;
+  const mats = Object.fromEntries((student.materials || []).map((m) => [m.id, m]));
+  const groupsById = Object.fromEntries((student.groups || []).map((g) => [g.id, g]));
+  const byKey = new Map();
+  for (const h of [...(student.homework || [])].sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt))) {
+    const key = h.materialId || `sub-${h.id}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(h);
+  }
+  const out = [];
+  for (const [key, subs] of byKey) {
+    if (!subs.some(isChecked)) continue;
+    const m = mats[key] || subs[0].material || {};
+    out.push({ key, subs, date: m.date || subs[0].submittedAt, text: m.text || "", link: m.link || "", groupName: groupsById[subs[0].groupId]?.name || "", latest: subs[0].submittedAt });
+  }
+  return out.sort((a, b) => new Date(b.latest) - new Date(a.latest));
+}
+
 function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
   // Открытый тест запоминаем: если ученик вышел из приложения посреди теста, при входе он откроется снова.
   const openKey = `gu_open_lesson_${student.id}`;
@@ -1504,6 +2299,11 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
   const locale = LOCALE_OF[lang] || "ru-RU";
   const [showOld, setShowOld] = useState(false);
   const [openMaterialId, setOpenMaterialId] = useState(null);
+  // Вкладки: «Задания» и «Проверенные» — архив всех проверенных работ с разбором, доступен всегда.
+  const hwTabKey = `gu_hw_tab_${student.id}`;
+  const [hwTab, setHwTabRaw] = useState(() => { try { return localStorage.getItem(hwTabKey) || "tasks"; } catch { return "tasks"; } });
+  const setHwTab = (v) => { haptic("light"); setHwTabRaw(v); try { localStorage.setItem(hwTabKey, v); } catch {} };
+  const checked = checkedHomeworkGroups(student);
   const materials = [...(student.materials || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
   const tasks = computeHomeworkTasks(student);
   const openTask = (task) => {
@@ -1521,8 +2321,47 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
       <HomeworkSubmitBox material={m} student={student} onSubmitHomework={onSubmitHomework} onOpenLesson={(h) => setLessonSubId(h.id)} autoOpen={openMaterialId === m.id} onAutoOpened={() => setOpenMaterialId(null)} t={t} locale={locale} />
     </PlainCard>
   );
+  const tabs = (
+    <div className="flex gap-1 p-1 rounded-2xl" style={{ background: "var(--surface-alt)" }}>
+      {[["tasks", t("hw_tab_tasks"), null], ["checked", t("hw_tab_checked"), checked.length]].map(([k, label, n]) => (
+        <button key={k} onClick={() => setHwTab(k)} className="flex-1 py-2 rounded-xl text-[13px] font-bold flex items-center justify-center gap-1.5 transition-colors"
+          style={{ background: hwTab === k ? "var(--surface)" : "transparent", color: hwTab === k ? "var(--ink)" : "var(--ink-sub)", boxShadow: hwTab === k ? "0 1px 6px rgba(26,26,23,0.08)" : "none" }}>
+          {label}{n ? <span className="text-[11px] font-bold px-1.5 rounded-full" style={{ background: "var(--soft-green-bg)", color: "var(--soft-green-fg)" }}>{n}</span> : null}
+        </button>
+      ))}
+    </div>
+  );
+  if (hwTab === "checked") {
+    return (
+      <div className="space-y-3">
+        {tabs}
+        {lessonSub && lessonSub.aiLesson && <TopicReviewSheet key={lessonSub.id} h={lessonSub} t={t} onClose={() => setLessonSubId(null)} onSubmitQuiz={onSubmitQuiz} />}
+        {checked.length === 0 ? (
+          <PlainCard><EmptyState text={t("hw_checked_empty")} icon={ClipboardList} /></PlainCard>
+        ) : (
+          <>
+            <div className="text-[11.5px] px-1" style={{ color: "var(--ink-sub)" }}>{t("hw_checked_hint")}</div>
+            {checked.map((g) => (
+              <PlainCard key={g.key} className="py-3.5">
+                <div className="text-[11.5px] font-semibold flex items-center gap-1.5" style={{ color: "var(--ink-3)" }}>
+                  <Calendar size={12} />{g.date ? new Date(g.date).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "long" }) : ""}
+                  {g.groupName && <span className="truncate">· {g.groupName}</span>}
+                </div>
+                {g.text && <div className="text-[14.5px] font-semibold mt-1 leading-snug" style={{ color: "var(--ink)" }}>{g.text}</div>}
+                {g.link && <a href={g.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-semibold inline-flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} />{t("open_material")}</a>}
+                <div className="mt-2.5 pt-2.5" style={{ borderTop: "1px dashed var(--soft-yellow-border)" }}>
+                  {g.subs.map((h, i) => <HomeworkStatusCard key={h.id} h={h} isLatest={i === 0} t={t} locale={locale} onOpenLesson={(x) => setLessonSubId(x.id)} />)}
+                </div>
+              </PlainCard>
+            ))}
+          </>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="space-y-3">
+      {tabs}
       <AdmissionBanner student={student} t={t} locale={locale} />
       {tasks.length > 0 ? (
         <PlainCard>
@@ -2212,6 +3051,25 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
 /* ----------------------------------- Переводы ----------------------------------- */
 const TRANSLATIONS = {
   ru: {
+    test_words_n: "{n} слов",
+    vocab_ph_ru: "Перевод на русском", vocab_ph_en: "English word",
+    close: "Закрыть", tests_title: "Тесты", tests_sub_todo: "Есть тест", tests_sub_wait: "Ждём учителя", tests_sub_done: "Всё сдано", tests_sub_none: "Пока нет",
+    tests_empty: "Учитель ещё не открыл тесты для вашей группы", tests_todo: "Нужно пройти", tests_done: "Сданные и закрытые",
+    test_st_new: "Новый", test_st_in_progress: "Начат", test_st_retake: "Нужна пересдача", test_st_needs_teacher: "Повторить с учителем", test_st_checking: "Проверяется", test_st_passed: "Сдан", test_st_failed_final: "Не сдан",
+    test_btn_start: "Начать тест", test_btn_continue: "Продолжить", test_btn_retake: "Повторить материал и пересдать", test_btn_result: "Посмотреть результат",
+    test_pass_short: "проходной {p}%", test_best: "{s} из {m}", test_attempts_used: "попытка {n} из {m}", test_minutes: "{n} мин",
+    test_attempt_n: "Попытка {n} из {m}", test_exercise_n: "Упражнение {n} из {m}", test_exercise_short: "Упражнение {n}", test_points_n: "{n} баллов",
+    test_bank: "Слова для ответа — нажми, чтобы вставить", test_pick_letter: "Выбери букву ответа", test_writing_placeholder: "Пиши по-английски…", test_words: "Слов: {n}", test_tr_placeholder: "Перевод на русском или узбекском…", test_en_placeholder: "Напиши по-английски…", test_open_placeholder: "Ответь о себе по-английски…", test_sample: "Образец", test_part_points: "Засчитано частично: {n} из {m}",
+    test_submit: "Сдать тест", test_checking: "Проверяем…", test_checking_long: "Проверяем ответы… Это может занять до минуты.",
+    test_confirm_title: "Сдать тест?", test_confirm_unanswered: "Без ответа: {n}. Эти вопросы будут засчитаны как неверные.", test_confirm_all: "На все вопросы есть ответ.", test_time_spent: "Время: {time}", test_back_to_test: "Вернуться",
+    test_result_title: "Результат теста", test_of_max: "из {m}", test_passed_big: "Тест сдан!", test_failed_big: "Тест не сдан", test_checking_big: "Почти готово",
+    test_res_passed: "Отлично! Оценка уже в журнале.", test_res_retake: "Нужно набрать {p}%. Повтори материал по своим ошибкам и пересдай тест.",
+    test_res_needs_teacher: "Набрано меньше половины. Учитель проведёт с тобой повторное занятие — после него откроется пересдача.",
+    test_res_checking: "Часть ответов проверит учитель — итог появится позже.", test_res_failed_final: "Попытки закончились. Оценка поставлена по лучшей попытке.",
+    test_grade_n: "Оценка {n}", test_by_exercise: "Баллы по упражнениям", test_writing_title: "Письменное задание", test_writing_pending_chip: "Проверит учитель", test_writing_pending: "Нейросеть не смогла проверить текст — его проверит учитель.",
+    test_mistakes: "Ошибки", test_restudy_title: "Повторение материала", test_restudy_btn: "Повторить материал",
+    test_restudy_intro: "Прочитай правило к каждому упражнению, где были ошибки, и посмотри правильные ответы. Потом можно пересдать тест.",
+    test_retake_btn: "Пересдать тест (попытка {n} из {m})", test_no_retakes: "Пересдач больше нет", test_wait_teacher: "Ждём повторного занятия с учителем", test_attempts_left: "Осталось пересдач: {n}",
     lesson_now: "идёт сейчас", lesson_in_min: "через {m} мин", lesson_in_hm: "через {h} ч {m} мин", lesson_also: "Ещё сегодня",
     homework_short: "Домашка", progress_short: "Прогресс", service_support_lesson_short: "Суппорт-урок", service_topic_reexplain_short: "Объяснить тему", service_materials_only_short: "Материалы",
     hw_sub_todo: "Есть несданные", hw_sub_checking: "Проверяется", hw_sub_done: "Всё сдано", avg_short: "балл", notices_none_short: "Нет новых",
@@ -2238,7 +3096,7 @@ const TRANSLATIONS = {
     trend_up: "Растёт", trend_down: "Снижается", trend_same: "Стабильно",
     lessons_attended: "занятий посещено", streak_days: "подряд без пропусков", avg_grade: "средний балл",
     progress_homework: "ДЗ сдано", progress_coins: "монет",
-    homework_show_old: "Показать старые ({n})", homework_hide_old: "Скрыть старые",
+    homework_show_old: "Показать старые ({n})", hw_tab_tasks: "Задания", hw_tab_checked: "Проверенные", hw_checked_empty: "Здесь появятся твои проверенные ДЗ с разбором — они хранятся всегда.", hw_checked_hint: "Все проверенные работы с разбором и комментариями учителя. Они хранятся всегда.", hw_archived_note: "Задание снято учителем — твоя работа и разбор сохранены.", homework_hide_old: "Скрыть старые",
     no_group: "Пока не закреплена группа", teacher_label: "Преподаватель",
     attendance_grades: "Посещаемость и оценки", no_attendance: "Пока нет отметок посещаемости",
     homework: "Домашнее задание", no_homework: "Пока нет домашних заданий", open_material: "Открыть материал",
@@ -2313,6 +3171,25 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Победы на олимпиадах, высокие баллы на тестах и другие достижения.",
   },
   en: {
+    test_words_n: "{n} words",
+    vocab_ph_ru: "Russian translation", vocab_ph_en: "English word",
+    close: "Close", tests_title: "Tests", tests_sub_todo: "New test", tests_sub_wait: "Waiting for teacher", tests_sub_done: "All done", tests_sub_none: "None yet",
+    tests_empty: "Your teacher hasn't opened any tests for your group yet", tests_todo: "To do", tests_done: "Done and closed",
+    test_st_new: "New", test_st_in_progress: "Started", test_st_retake: "Retake needed", test_st_needs_teacher: "Review with teacher", test_st_checking: "Being checked", test_st_passed: "Passed", test_st_failed_final: "Not passed",
+    test_btn_start: "Start test", test_btn_continue: "Continue", test_btn_retake: "Review and retake", test_btn_result: "See result",
+    test_pass_short: "pass {p}%", test_best: "{s} of {m}", test_attempts_used: "attempt {n} of {m}", test_minutes: "{n} min",
+    test_attempt_n: "Attempt {n} of {m}", test_exercise_n: "Exercise {n} of {m}", test_exercise_short: "Exercise {n}", test_points_n: "{n} points",
+    test_bank: "Words for answers — tap to insert", test_pick_letter: "Choose the answer letter", test_writing_placeholder: "Write in English…", test_words: "Words: {n}", test_tr_placeholder: "Translation in Russian or Uzbek…", test_en_placeholder: "Write in English…", test_open_placeholder: "Answer about yourself in English…", test_sample: "Sample", test_part_points: "Partly correct: {n} of {m}",
+    test_submit: "Submit test", test_checking: "Checking…", test_checking_long: "Checking your answers… This can take up to a minute.",
+    test_confirm_title: "Submit the test?", test_confirm_unanswered: "Unanswered: {n}. They will count as wrong.", test_confirm_all: "All questions are answered.", test_time_spent: "Time: {time}", test_back_to_test: "Go back",
+    test_result_title: "Test result", test_of_max: "of {m}", test_passed_big: "Test passed!", test_failed_big: "Test not passed", test_checking_big: "Almost done",
+    test_res_passed: "Great! The grade is in the journal.", test_res_retake: "You need {p}%. Review your mistakes and retake the test.",
+    test_res_needs_teacher: "Less than half. Your teacher will review the material with you — then the retake opens.",
+    test_res_checking: "The teacher will check some of your answers — the result will appear later.", test_res_failed_final: "No attempts left. The grade is based on your best attempt.",
+    test_grade_n: "Grade {n}", test_by_exercise: "Points by exercise", test_writing_title: "Writing task", test_writing_pending_chip: "Teacher will check", test_writing_pending: "The AI couldn't check the text — your teacher will.",
+    test_mistakes: "Mistakes", test_restudy_title: "Review", test_restudy_btn: "Review the material",
+    test_restudy_intro: "Read the rule for each exercise with mistakes and look at the correct answers. Then you can retake the test.",
+    test_retake_btn: "Retake (attempt {n} of {m})", test_no_retakes: "No retakes left", test_wait_teacher: "Waiting for a review lesson with the teacher", test_attempts_left: "Retakes left: {n}",
     lesson_now: "in progress", lesson_in_min: "in {m} min", lesson_in_hm: "in {h} h {m} min", lesson_also: "Also today",
     homework_short: "Homework", progress_short: "Progress", service_support_lesson_short: "Support lesson", service_topic_reexplain_short: "Explain a topic", service_materials_only_short: "Materials",
     hw_sub_todo: "Not submitted yet", hw_sub_checking: "Being checked", hw_sub_done: "All done", avg_short: "avg", notices_none_short: "Nothing new",
@@ -2339,7 +3216,7 @@ const TRANSLATIONS = {
     trend_up: "Improving", trend_down: "Declining", trend_same: "Stable",
     lessons_attended: "lessons attended", streak_days: "in a row, no misses", avg_grade: "average grade",
     progress_homework: "homework done", progress_coins: "coins",
-    homework_show_old: "Show older ({n})", homework_hide_old: "Hide older",
+    homework_show_old: "Show older ({n})", hw_tab_tasks: "Tasks", hw_tab_checked: "Checked", hw_checked_empty: "Your checked homework with feedback will appear here — it is kept forever.", hw_checked_hint: "All your checked work with feedback and teacher comments. It is kept forever.", hw_archived_note: "The teacher removed this task — your work and feedback are saved.", homework_hide_old: "Hide older",
     no_group: "No group assigned yet", teacher_label: "Teacher",
     attendance_grades: "Attendance & grades", no_attendance: "No attendance records yet",
     homework: "Homework", no_homework: "No homework yet", open_material: "Open material",
@@ -2414,6 +3291,25 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Wins at olympiads, high test scores, and other achievements.",
   },
   uz: {
+    test_words_n: "{n} ta so'z",
+    vocab_ph_ru: "Ruscha tarjima", vocab_ph_en: "English word",
+    close: "Yopish", tests_title: "Testlar", tests_sub_todo: "Yangi test", tests_sub_wait: "O'qituvchini kutamiz", tests_sub_done: "Hammasi topshirildi", tests_sub_none: "Hozircha yo'q",
+    tests_empty: "O'qituvchi hali guruhingiz uchun test ochmagan", tests_todo: "Topshirish kerak", tests_done: "Topshirilgan va yopilgan",
+    test_st_new: "Yangi", test_st_in_progress: "Boshlangan", test_st_retake: "Qayta topshirish kerak", test_st_needs_teacher: "O'qituvchi bilan takrorlash", test_st_checking: "Tekshirilmoqda", test_st_passed: "Topshirildi", test_st_failed_final: "Topshirilmadi",
+    test_btn_start: "Testni boshlash", test_btn_continue: "Davom etish", test_btn_retake: "Takrorlab, qayta topshirish", test_btn_result: "Natijani ko'rish",
+    test_pass_short: "o'tish bali {p}%", test_best: "{m} dan {s}", test_attempts_used: "{m} dan {n}-urinish", test_minutes: "{n} daq",
+    test_attempt_n: "{m} dan {n}-urinish", test_exercise_n: "{m} dan {n}-mashq", test_exercise_short: "{n}-mashq", test_points_n: "{n} ball",
+    test_bank: "Javob uchun so'zlar — qo'yish uchun bosing", test_pick_letter: "Javob harfini tanlang", test_writing_placeholder: "Inglizcha yozing…", test_words: "So'zlar: {n}", test_tr_placeholder: "Rus yoki o'zbek tilidagi tarjima…", test_en_placeholder: "Inglizcha yozing…", test_open_placeholder: "O'zingiz haqingizda inglizcha javob bering…", test_sample: "Namuna", test_part_points: "Qisman qabul qilindi: {m} dan {n}",
+    test_submit: "Testni topshirish", test_checking: "Tekshirilmoqda…", test_checking_long: "Javoblar tekshirilmoqda… Bu bir daqiqagacha vaqt olishi mumkin.",
+    test_confirm_title: "Testni topshirasizmi?", test_confirm_unanswered: "Javobsiz: {n}. Ular noto'g'ri deb hisoblanadi.", test_confirm_all: "Barcha savollarga javob berilgan.", test_time_spent: "Vaqt: {time}", test_back_to_test: "Qaytish",
+    test_result_title: "Test natijasi", test_of_max: "{m} dan", test_passed_big: "Test topshirildi!", test_failed_big: "Test topshirilmadi", test_checking_big: "Deyarli tayyor",
+    test_res_passed: "Ajoyib! Baho jurnalga qo'yildi.", test_res_retake: "{p}% to'plash kerak. Xatolaringiz bo'yicha takrorlab, testni qayta topshiring.",
+    test_res_needs_teacher: "Yarmidan kam. O'qituvchi siz bilan qayta dars o'tadi — keyin qayta topshirish ochiladi.",
+    test_res_checking: "Ba'zi javoblarni o'qituvchi tekshiradi — natija keyinroq chiqadi.", test_res_failed_final: "Urinishlar tugadi. Baho eng yaxshi urinish bo'yicha qo'yildi.",
+    test_grade_n: "Baho {n}", test_by_exercise: "Mashqlar bo'yicha ballar", test_writing_title: "Yozma topshiriq", test_writing_pending_chip: "O'qituvchi tekshiradi", test_writing_pending: "Sun'iy intellekt matnni tekshira olmadi — uni o'qituvchi tekshiradi.",
+    test_mistakes: "Xatolar", test_restudy_title: "Mavzuni takrorlash", test_restudy_btn: "Mavzuni takrorlash",
+    test_restudy_intro: "Xato bo'lgan har bir mashq qoidasini o'qing va to'g'ri javoblarni ko'ring. Keyin testni qayta topshirish mumkin.",
+    test_retake_btn: "Qayta topshirish ({m} dan {n}-urinish)", test_no_retakes: "Boshqa urinish yo'q", test_wait_teacher: "O'qituvchi bilan qayta darsni kutamiz", test_attempts_left: "Qolgan urinishlar: {n}",
     lesson_now: "hozir davom etmoqda", lesson_in_min: "{m} daqiqadan keyin", lesson_in_hm: "{h} soat {m} daqiqadan keyin", lesson_also: "Bugun yana",
     homework_short: "Uy vazifa", progress_short: "Natijalar", service_support_lesson_short: "Qo'shimcha dars", service_topic_reexplain_short: "Mavzuni tushuntirish", service_materials_only_short: "Materiallar",
     hw_sub_todo: "Topshirilmagan bor", hw_sub_checking: "Tekshirilmoqda", hw_sub_done: "Hammasi topshirildi", avg_short: "baho", notices_none_short: "Yangi yo'q",
@@ -2440,7 +3336,7 @@ const TRANSLATIONS = {
     trend_up: "O'smoqda", trend_down: "Pasaymoqda", trend_same: "Barqaror",
     lessons_attended: "dars qatnashildi", streak_days: "ketma-ket, qoldirmasdan", avg_grade: "o'rtacha baho",
     progress_homework: "vazifa topshirildi", progress_coins: "tanga",
-    homework_show_old: "Eskilarini ko'rsatish ({n})", homework_hide_old: "Eskilarini yashirish",
+    homework_show_old: "Eskilarini ko'rsatish ({n})", hw_tab_tasks: "Vazifalar", hw_tab_checked: "Tekshirilgan", hw_checked_empty: "Bu yerda tahlili bilan tekshirilgan uyga vazifalaringiz paydo bo'ladi — ular doim saqlanadi.", hw_checked_hint: "Tahlil va o'qituvchi izohlari bilan barcha tekshirilgan ishlaringiz. Ular doim saqlanadi.", hw_archived_note: "O'qituvchi vazifani olib tashladi — ishingiz va tahlil saqlangan.", homework_hide_old: "Eskilarini yashirish",
     no_group: "Hali guruh biriktirilmagan", teacher_label: "O'qituvchi",
     attendance_grades: "Davomat va baholar", no_attendance: "Hozircha davomat belgilari yo'q",
     homework: "Uyga vazifa", no_homework: "Hozircha uyga vazifa yo'q", open_material: "Materialni ochish",
@@ -2813,6 +3709,8 @@ export default function ParentApp() {
     const key = `gu_open_lesson_${student.id}`;
     let local = null; try { local = localStorage.getItem(key); } catch {}
     if (local) { setScreen("homework"); return; }
+    // Вышел посреди теста по юниту — при входе сразу открываем «Тесты» (там тест продолжится).
+    if ((student.tests || []).some((x) => x.inProgress && x.canStart)) { setScreen("tests"); return; }
     storageGet(key).then((v) => { if (v) setScreen((cur) => cur || "homework"); });
   }, [student?.id]);
 
@@ -2910,6 +3808,19 @@ export default function ParentApp() {
       setToast(t("server_unreachable", { msg: String(e?.message || e) }));
       setTimeout(() => setToast(""), 3500);
       return { ok: false };
+    } finally {
+      pendingMutationsRef.current--;
+    }
+  };
+
+  // Запросы тестов (начать, сдать, посмотреть разбор). Свежие данные ученика сразу применяем.
+  const testsApi = async (extra, timeoutMs) => {
+    pendingMutationsRef.current++;
+    try {
+      const res = await miniAppRequest(initData, phone.trim() || null, password.trim() || null, extra, timeoutMs);
+      if (res?.linked === false) return { error: t("identity_error") };
+      if (res?.students) { applyStudents(res.students); lastMutationAppliedRef.current++; }
+      return res;
     } finally {
       pendingMutationsRef.current--;
     }
@@ -3016,7 +3927,7 @@ export default function ParentApp() {
         {screen ? (
           <div className="flex items-center gap-2.5 min-w-0">
             <button onClick={() => { haptic("light"); setScreen(null); }} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={GLASS_BTN} aria-label={t("back")}><ChevronLeft size={20} /></button>
-            <div className="text-[18px] font-extrabold truncate">{screen === "homework" ? t("homework") : screen === "progress" ? t("progress_title") : t("notices_title")}</div>
+            <div className="text-[18px] font-extrabold truncate">{screen === "homework" ? t("homework") : screen === "progress" ? t("progress_title") : screen === "tests" ? t("tests_title") : t("notices_title")}</div>
           </div>
         ) : (
         <div className="flex items-center gap-2.5 min-w-0">
@@ -3079,6 +3990,7 @@ export default function ParentApp() {
           {tab === "home" && !screen && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onRequestService={handleRequestService} onOpenScreen={openScreen} />}
           {tab === "home" && screen === "homework" && <HomeworkScreen student={student} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onSubmitQuiz={handleSubmitQuiz} />}
           {tab === "home" && screen === "progress" && <ProgressScreen student={student} t={t} lang={lang} />}
+          {tab === "home" && screen === "tests" && <TestsScreen student={student} t={t} lang={lang} api={testsApi} />}
           {tab === "home" && screen === "notices" && <NoticesScreen notifications={student.notifications || []} t={t} lang={lang} />}
           {tab === "schedule" && <ScheduleTab student={student} t={t} lang={lang} />}
           {tab === "rating" && <RatingTab student={student} t={t} />}
