@@ -62,7 +62,7 @@ const {
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v25";
+const APP_VERSION = "v26";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
 
@@ -1352,23 +1352,41 @@ function SectionLabel({ children, className = "" }) {
 const VOC_DAYS = [0, 1, 2, 4, 8, 16];
 const VOC_LEARNED = 3;
 const VOC_ROUND = 15;
-function vocNorm(s) {
-  return String(s || "").toLowerCase().replace(/[‘’ʼ`´]/g, "'").replace(/[.,!?;:"«»()]/g, " ").replace(/\s+/g, " ").trim().replace(/^to /, "").replace(/^(a|an|the) /, "");
+// Изучаемый язык (по предмету группы): голос для произношения и подписи «по-английски / по-немецки…».
+const VOC_LANGS = {
+  en: { tts: "en-GB", ru: "по-английски", en: "in English", uz: "inglizcha" },
+  de: { tts: "de-DE", ru: "по-немецки", en: "in German", uz: "nemischa" },
+  zh: { tts: "zh-CN", ru: "по-китайски", en: "in Chinese", uz: "xitoycha" },
+  ko: { tts: "ko-KR", ru: "по-корейски", en: "in Korean", uz: "koreyscha" },
+  fr: { tts: "fr-FR", ru: "по-французски", en: "in French", uz: "fransuzcha" },
+  es: { tts: "es-ES", ru: "по-испански", en: "in Spanish", uz: "ispancha" },
+  tr: { tts: "tr-TR", ru: "по-турецки", en: "in Turkish", uz: "turkcha" },
+  ar: { tts: "ar-SA", ru: "по-арабски", en: "in Arabic", uz: "arabcha" },
+  ru: { tts: "ru-RU", ru: "по-русски", en: "in Russian", uz: "ruscha" },
+  uz: { tts: "uz-UZ", ru: "по-узбекски", en: "in Uzbek", uz: "o'zbekcha" },
+};
+const vocLangName = (lang, ui) => (VOC_LANGS[lang] || {})[ui] || (VOC_LANGS[lang] || {}).ru || "";
+function vocNorm(s, lang) {
+  let x = String(s || "").toLowerCase().replace(/[‘’ʼ`´]/g, "'").replace(/[.,!?;:"«»()。，！？]/g, " ").replace(/\s+/g, " ").trim();
+  if (!lang || lang === "en") x = x.replace(/^to /, "").replace(/^(a|an|the) /, "");
+  return x;
 }
 function vocAccepts(w, given) {
-  const g = vocNorm(given);
+  const g = vocNorm(given, w.lang);
   if (!g) return false;
   const list = [...(w.enAlts || []), w.en].flatMap((x) => String(x || "").split("/"));
-  return list.some((x) => vocNorm(x) === g);
+  return list.some((x) => vocNorm(x, w.lang) === g);
 }
-function vocSpeak(text) {
+function vocSpeak(text, lang = "en") {
   try {
     const synth = window.speechSynthesis;
     if (!synth) return;
     synth.cancel();
+    const code = (VOC_LANGS[lang] || VOC_LANGS.en).tts;
     const u = new SpeechSynthesisUtterance(String(text || "").split("/")[0]);
-    u.lang = "en-GB"; u.rate = 0.9;
-    const v = (synth.getVoices() || []).find((x) => /^en(-|_)/i.test(x.lang));
+    u.lang = code; u.rate = 0.9;
+    const pre = code.split("-")[0];
+    const v = (synth.getVoices() || []).find((x) => new RegExp(`^${pre}(-|_|$)`, "i").test(x.lang));
     if (v) u.voice = v;
     synth.speak(u);
   } catch {}
@@ -1389,10 +1407,10 @@ function vocPickRound(words, prog, n = VOC_ROUND) {
   return [...vocShuffle(due), ...fresh, ...rest].slice(0, n);
 }
 
-function SpeakBtn({ text, size = 34, light }) {
+function SpeakBtn({ text, lang, size = 34, light }) {
   if (!vocCanSpeak()) return null;
   return (
-    <button onClick={(e) => { e.stopPropagation(); haptic("light"); vocSpeak(text); }} aria-label="speak" className="rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform"
+    <button onClick={(e) => { e.stopPropagation(); haptic("light"); vocSpeak(text, lang); }} aria-label="speak" className="rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform"
       style={{ width: size, height: size, background: light ? "rgba(255,255,255,0.2)" : "var(--soft-blue-bg)", color: light ? "#fff" : BLUE }}>
       <Volume2 size={Math.round(size * 0.5)} />
     </button>
@@ -1411,7 +1429,7 @@ function VocBar({ value, total, color = GREEN_D, height = 6, soft = 0 }) {
 }
 
 // Один раунд тренировки. mode: "cards" | "choice" | "type".
-function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t }) {
+function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t, ui = "ru" }) {
   const [queue, setQueue] = useState(() => words.map((w, i) => ({ w, k: i, dir: mode === "choice" ? (i % 2 ? "ru" : "en") : "en" })));
   const [pos, setPos] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -1487,7 +1505,7 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t }) 
           style={{ minHeight: 280, background: flipped ? "var(--surface)" : `linear-gradient(150deg, ${BLUE}, #1E40AF)`, color: flipped ? "var(--ink)" : "#fff", boxShadow: "0 10px 30px rgba(26,26,23,0.12)" }}>
           <div className="text-[30px] font-extrabold leading-tight break-words">{w.en}</div>
           {w.tr && <div className="text-[16px] mt-1.5" style={{ opacity: 0.8 }}>{w.tr}</div>}
-          <div className="mt-3"><SpeakBtn text={w.en} size={42} light={!flipped} /></div>
+          <div className="mt-3"><SpeakBtn lang={w.lang} text={w.en} size={42} light={!flipped} /></div>
           {flipped ? (
             <div className="mt-5 pt-4 w-full" style={{ borderTop: `1px dashed ${LINE}` }}>
               <div className="text-[22px] font-bold leading-snug" style={{ color: GREEN_D }}>{w.ru}</div>
@@ -1516,10 +1534,10 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t }) 
       <div className="anim-fade">
         {top}{repeatTag}
         <PlainCard className="py-6 text-center">
-          <div className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--ink-3)" }}>{cur.dir === "en" ? t("voc_choose_ru") : t("voc_choose_en")}</div>
+          <div className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--ink-3)" }}>{cur.dir === "en" ? t("voc_choose_ru") : t("voc_choose_en", { l: vocLangName(w.lang, ui) })}</div>
           <div className="text-[26px] font-extrabold mt-2 leading-tight break-words">{cur.dir === "en" ? w.en : w.ru}</div>
           {cur.dir === "en" && w.tr && <div className="text-[15px] mt-1" style={{ color: "var(--ink-sub)" }}>{w.tr}</div>}
-          {cur.dir === "en" && <div className="mt-3 flex justify-center"><SpeakBtn text={w.en} /></div>}
+          {cur.dir === "en" && <div className="mt-3 flex justify-center"><SpeakBtn lang={w.lang} text={w.en} /></div>}
         </PlainCard>
         <div className="space-y-2 mt-3">
           {options.map((o) => {
@@ -1546,18 +1564,18 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t }) 
     if (!typed.trim()) return;
     const ok = vocAccepts(w, typed);
     setChecked(ok); answer(ok);
-    if (ok) { vocSpeak(w.en); setTimeout(next, 900); }
+    if (ok) { vocSpeak(w.en, w.lang); setTimeout(next, 900); }
   };
   return (
     <div className="anim-fade">
       {top}{repeatTag}
       <PlainCard className="py-6 text-center">
-        <div className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--ink-3)" }}>{t("voc_type_prompt")}</div>
+        <div className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--ink-3)" }}>{t("voc_type_prompt", { l: vocLangName(w.lang, ui) })}</div>
         <div className="text-[24px] font-extrabold mt-2 leading-tight break-words">{w.ru}</div>
         <div className="text-[12px] mt-1.5" style={{ color: "var(--ink-3)" }}>{t("voc_first_letter", { l: String(w.en || "?").trim()[0] || "?", n: String(w.en || "").split("/")[0].trim().length })}</div>
       </PlainCard>
       <input ref={inputRef} value={typed} onChange={(e) => { if (checked === null) setTyped(e.target.value); }} onKeyDown={(e) => { if (e.key === "Enter") check(); }}
-        autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={t("voc_type_ph")}
+        autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={t("voc_type_ph", { l: vocLangName(w.lang, ui) })}
         className="w-full mt-3 px-4 py-4 rounded-[18px] text-[18px] font-semibold text-center outline-none"
         style={{ background: checked === true ? "var(--soft-green-bg)" : checked === false ? "var(--soft-red-bg)" : "var(--surface)", color: "var(--ink)", border: `1.5px solid ${checked === true ? GREEN_D : checked === false ? RED : LINE}` }} />
       {checked === false && (
@@ -1566,7 +1584,7 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t }) 
             <div className="text-[11.5px]" style={{ color: "var(--ink-3)" }}>{t("voc_right_is")}</div>
             <div className="text-[19px] font-extrabold" style={{ color: GREEN_D }}>{w.en} <span className="text-[13px] font-medium" style={{ color: "var(--ink-sub)" }}>{w.tr}</span></div>
           </div>
-          <SpeakBtn text={w.en} />
+          <SpeakBtn lang={w.lang} text={w.en} />
         </div>
       )}
       <div className="grid grid-cols-2 gap-2.5 mt-3">
@@ -1577,7 +1595,7 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t }) 
   );
 }
 
-function VocabScreen({ student, t, api }) {
+function VocabScreen({ student, t, api, lang: ui = "ru" }) {
   const [lib, setLib] = useState(null);
   const [err, setErr] = useState("");
   const [book, setBook] = useState(null);
@@ -1663,7 +1681,7 @@ function VocabScreen({ student, t, api }) {
   if (session) {
     const flatProg = session.review ? Object.assign({}, ...Object.values(prog)) : (prog[unit?.testId] || {});
     return (
-      <VocabSession key={session.key} words={session.words} pool={session.pool} mode={session.mode} prog={flatProg} onGrade={grade} t={t}
+      <VocabSession key={session.key} words={session.words} pool={session.pool} mode={session.mode} prog={flatProg} onGrade={grade} t={t} ui={ui}
         onExit={closeSession}
         onAgain={() => setSession((s) => ({ ...s, key: Date.now(), words: s.review ? vocShuffle(s.pool).slice(0, 20) : vocPickRound(unit.words, prog[unit.testId] || {}) }))} />
     );
@@ -1679,7 +1697,7 @@ function VocabScreen({ student, t, api }) {
     const modes = [
       { mode: "cards", icon: Layers, bg: "var(--soft-blue-bg)", color: BLUE, title: t("voc_mode_cards"), sub: t("voc_mode_cards_sub") },
       { mode: "choice", icon: ListChecks, bg: "var(--soft-purple-bg)", color: PURPLE, title: t("voc_mode_choice"), sub: t("voc_mode_choice_sub") },
-      { mode: "type", icon: Keyboard, bg: "var(--soft-green-bg)", color: GREEN_D, title: t("voc_mode_type"), sub: t("voc_mode_type_sub") },
+      { mode: "type", icon: Keyboard, bg: "var(--soft-green-bg)", color: GREEN_D, title: t("voc_mode_type"), sub: t("voc_mode_type_sub", { l: vocLangName(unit.lang || unit.words[0]?.lang, ui) }) },
     ];
     const dot = { new: "var(--ink-3)", learning: "#EA580C", learned: GREEN_D, due: RED };
     return (
@@ -1728,7 +1746,7 @@ function VocabScreen({ student, t, api }) {
                     <div className="text-[14.5px] font-bold break-words">{w.en} <span className="text-[12px] font-medium" style={{ color: "var(--ink-sub)" }}>{w.tr}</span></div>
                     <div className="text-[13px] break-words" style={{ color: "var(--ink-2)" }}>{w.ru}</div>
                   </div>
-                  <SpeakBtn text={w.en} size={32} />
+                  <SpeakBtn lang={w.lang} text={w.en} size={32} />
                 </div>
               );
             })}
@@ -1746,6 +1764,7 @@ function VocabScreen({ student, t, api }) {
   if (!lib.books.length) return <PlainCard><EmptyState text={t("voc_empty")} emoji="📚" /></PlainCard>;
   const cur = lib.books.find((b) => b.book === book) || lib.books[0];
   const due = lib.totals?.due || 0;
+  const multiCourse = (lib.courses || []).length > 1;
   return (
     <div className="anim-fade">
       <div className="rounded-[24px] p-4 text-white" style={{ background: `linear-gradient(140deg, ${PURPLE}, #4C1D95)`, boxShadow: "0 10px 26px rgba(76,29,149,0.25)" }}>
@@ -1768,12 +1787,12 @@ function VocabScreen({ student, t, api }) {
           {lib.books.map((b) => (
             <button key={b.book} onClick={() => { haptic("light"); setBook(b.book); }} className="shrink-0 px-3.5 py-2 rounded-full text-[12.5px] font-bold whitespace-nowrap"
               style={{ background: cur.book === b.book ? "var(--ink)" : "var(--surface)", color: cur.book === b.book ? "var(--surface)" : "var(--ink)", boxShadow: "0 2px 8px rgba(26,26,23,0.06)" }}>
-              {String(b.bookTitle).replace(/^New Headway\s*/i, "") || b.bookTitle} · {b.level}{b.recommended ? " ★" : ""}
+              {multiCourse ? `${String(b.course || "").replace(/\s*язык\s*$/i, "")} · ` : ""}{String(b.bookTitle).replace(/^New Headway\s*/i, "") || b.bookTitle} · {b.level}{b.recommended ? " ★" : ""}
             </button>
           ))}
         </div>
       )}
-      <SectionLabel className="mt-4">{cur.bookTitle}{cur.recommended ? ` · ${t("voc_my_level")}` : ""}</SectionLabel>
+      <SectionLabel className="mt-4">{multiCourse && cur.course ? `${cur.course} · ` : ""}{cur.bookTitle}{cur.recommended ? ` · ${t("voc_my_level")}` : ""}</SectionLabel>
       {err && <div className="text-[12.5px] mb-2 text-center" style={{ color: RED }}>{err}</div>}
       <div className="space-y-2">
         {cur.units.map((u) => {
@@ -3520,7 +3539,7 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
 /* ----------------------------------- Переводы ----------------------------------- */
 const TRANSLATIONS = {
   ru: {
-    voc_title: "Слова", voc_home_title: "Учить слова", voc_home_sub: "Карточки, тренировки, повторение", voc_hero_title: "Мои слова", voc_hero_learned: "Выучено слов: {n}", voc_review_btn: "Повторить слова ({n})", voc_review_none: "Повторять пока нечего", voc_nothing_due: "Сейчас нечего повторять", voc_my_level: "мой уровень", voc_new_chip: "новый", voc_learned_of: "Выучено {n} из {m}", voc_unit_line: "Выучено {l} · учу {s} · всего {m}", voc_words_n: "Слов: {n}", voc_empty: "Слов пока нет — их загружает центр вместе с тестами.", voc_all_units: "Все юниты", voc_st_new: "Новые", voc_st_learning: "Учу", voc_st_due: "Повторить", voc_st_learned: "Выучено", voc_how_learn: "Как учить", voc_mode_cards: "Карточки", voc_mode_cards_sub: "Смотришь слово, переворачиваешь — видишь перевод", voc_mode_choice: "Выбери перевод", voc_mode_choice_sub: "4 варианта ответа", voc_mode_type: "Напиши слово", voc_mode_type_sub: "Пишешь по-английски — так лучше всего запоминается", voc_round_hint: "В одном раунде {n} слов: сначала те, что пора повторить, потом новые.", voc_word_list: "Все слова юнита ({n})", voc_show: "Показать", voc_hide: "Скрыть", voc_done_title: "Раунд пройден!", voc_done_first: "С первого раза верно: {c} из {n}", voc_done_learned: "Выучено новых слов: {n}", voc_done_hint: "Слова с ошибками вернутся на повторение. Выученные слова приложение напомнит повторить через несколько дней, чтобы не забылись.", voc_back_unit: "К юниту", voc_again: "Ещё раунд", voc_repeat_word: "Ещё раз это слово", voc_tap_flip: "Нажми, чтобы увидеть перевод", voc_dont_know: "Не знаю", voc_know: "Знаю", voc_choose_ru: "Выбери перевод", voc_choose_en: "Выбери английское слово", voc_right_is: "Правильно:", voc_type_prompt: "Напиши по-английски", voc_first_letter: "Первая буква «{l}» · длина {n}", voc_type_ph: "Английское слово", voc_show_answer: "Не знаю", voc_check: "Проверить", voc_next: "Дальше",
+    voc_title: "Слова", voc_home_title: "Учить слова", voc_home_sub: "Карточки, тренировки, повторение", voc_hero_title: "Мои слова", voc_hero_learned: "Выучено слов: {n}", voc_review_btn: "Повторить слова ({n})", voc_review_none: "Повторять пока нечего", voc_nothing_due: "Сейчас нечего повторять", voc_my_level: "мой уровень", voc_new_chip: "новый", voc_learned_of: "Выучено {n} из {m}", voc_unit_line: "Выучено {l} · учу {s} · всего {m}", voc_words_n: "Слов: {n}", voc_empty: "По твоему предмету слов пока нет — их загружает центр вместе с тестами.", voc_all_units: "Все юниты", voc_st_new: "Новые", voc_st_learning: "Учу", voc_st_due: "Повторить", voc_st_learned: "Выучено", voc_how_learn: "Как учить", voc_mode_cards: "Карточки", voc_mode_cards_sub: "Смотришь слово, переворачиваешь — видишь перевод", voc_mode_choice: "Выбери перевод", voc_mode_choice_sub: "4 варианта ответа", voc_mode_type: "Напиши слово", voc_mode_type_sub: "Пишешь {l} — так лучше всего запоминается", voc_round_hint: "В одном раунде {n} слов: сначала те, что пора повторить, потом новые.", voc_word_list: "Все слова юнита ({n})", voc_show: "Показать", voc_hide: "Скрыть", voc_done_title: "Раунд пройден!", voc_done_first: "С первого раза верно: {c} из {n}", voc_done_learned: "Выучено новых слов: {n}", voc_done_hint: "Слова с ошибками вернутся на повторение. Выученные слова приложение напомнит повторить через несколько дней, чтобы не забылись.", voc_back_unit: "К юниту", voc_again: "Ещё раунд", voc_repeat_word: "Ещё раз это слово", voc_tap_flip: "Нажми, чтобы увидеть перевод", voc_dont_know: "Не знаю", voc_know: "Знаю", voc_choose_ru: "Выбери перевод", voc_choose_en: "Выбери слово {l}", voc_right_is: "Правильно:", voc_type_prompt: "Напиши {l}", voc_first_letter: "Первая буква «{l}» · длина {n}", voc_type_ph: "Слово {l}", voc_show_answer: "Не знаю", voc_check: "Проверить", voc_next: "Дальше",
     test_words_n: "{n} слов",
     vocab_ph_ru: "Перевод на русском", vocab_ph_en: "English word",
     close: "Закрыть", tests_title: "Тесты", tests_sub_todo: "Есть тест", tests_sub_wait: "Ждём учителя", tests_sub_done: "Всё сдано", tests_sub_none: "Пока нет",
@@ -3641,7 +3660,7 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Победы на олимпиадах, высокие баллы на тестах и другие достижения.",
   },
   en: {
-    voc_title: "Words", voc_home_title: "Learn words", voc_home_sub: "Flashcards, practice, review", voc_hero_title: "My words", voc_hero_learned: "Words learned: {n}", voc_review_btn: "Review words ({n})", voc_review_none: "Nothing to review yet", voc_nothing_due: "Nothing to review right now", voc_my_level: "my level", voc_new_chip: "new", voc_learned_of: "Learned {n} of {m}", voc_unit_line: "Learned {l} · learning {s} · total {m}", voc_words_n: "Words: {n}", voc_empty: "No words yet — the centre uploads them together with the tests.", voc_all_units: "All units", voc_st_new: "New", voc_st_learning: "Learning", voc_st_due: "Review", voc_st_learned: "Learned", voc_how_learn: "How to learn", voc_mode_cards: "Flashcards", voc_mode_cards_sub: "See the word, flip the card — see the translation", voc_mode_choice: "Choose the translation", voc_mode_choice_sub: "4 options", voc_mode_type: "Type the word", voc_mode_type_sub: "Type it in English — the best way to remember", voc_round_hint: "One round has {n} words: first the ones due for review, then new ones.", voc_word_list: "All unit words ({n})", voc_show: "Show", voc_hide: "Hide", voc_done_title: "Round complete!", voc_done_first: "Right the first time: {c} of {n}", voc_done_learned: "New words learned: {n}", voc_done_hint: "Words you got wrong will come back for review. Learned words will come back in a few days so you don't forget them.", voc_back_unit: "Back to unit", voc_again: "Another round", voc_repeat_word: "This word again", voc_tap_flip: "Tap to see the translation", voc_dont_know: "Don't know", voc_know: "Know it", voc_choose_ru: "Choose the translation", voc_choose_en: "Choose the English word", voc_right_is: "Correct:", voc_type_prompt: "Type it in English", voc_first_letter: "Starts with “{l}” · length {n}", voc_type_ph: "English word", voc_show_answer: "Don't know", voc_check: "Check", voc_next: "Next",
+    voc_title: "Words", voc_home_title: "Learn words", voc_home_sub: "Flashcards, practice, review", voc_hero_title: "My words", voc_hero_learned: "Words learned: {n}", voc_review_btn: "Review words ({n})", voc_review_none: "Nothing to review yet", voc_nothing_due: "Nothing to review right now", voc_my_level: "my level", voc_new_chip: "new", voc_learned_of: "Learned {n} of {m}", voc_unit_line: "Learned {l} · learning {s} · total {m}", voc_words_n: "Words: {n}", voc_empty: "No words for your subject yet — the centre uploads them together with the tests.", voc_all_units: "All units", voc_st_new: "New", voc_st_learning: "Learning", voc_st_due: "Review", voc_st_learned: "Learned", voc_how_learn: "How to learn", voc_mode_cards: "Flashcards", voc_mode_cards_sub: "See the word, flip the card — see the translation", voc_mode_choice: "Choose the translation", voc_mode_choice_sub: "4 options", voc_mode_type: "Type the word", voc_mode_type_sub: "Type it {l} — the best way to remember", voc_round_hint: "One round has {n} words: first the ones due for review, then new ones.", voc_word_list: "All unit words ({n})", voc_show: "Show", voc_hide: "Hide", voc_done_title: "Round complete!", voc_done_first: "Right the first time: {c} of {n}", voc_done_learned: "New words learned: {n}", voc_done_hint: "Words you got wrong will come back for review. Learned words will come back in a few days so you don't forget them.", voc_back_unit: "Back to unit", voc_again: "Another round", voc_repeat_word: "This word again", voc_tap_flip: "Tap to see the translation", voc_dont_know: "Don't know", voc_know: "Know it", voc_choose_ru: "Choose the translation", voc_choose_en: "Choose the word {l}", voc_right_is: "Correct:", voc_type_prompt: "Type it {l}", voc_first_letter: "Starts with “{l}” · length {n}", voc_type_ph: "Word {l}", voc_show_answer: "Don't know", voc_check: "Check", voc_next: "Next",
     test_words_n: "{n} words",
     vocab_ph_ru: "Russian translation", vocab_ph_en: "English word",
     close: "Close", tests_title: "Tests", tests_sub_todo: "New test", tests_sub_wait: "Waiting for teacher", tests_sub_done: "All done", tests_sub_none: "None yet",
@@ -3762,7 +3781,7 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Wins at olympiads, high test scores, and other achievements.",
   },
   uz: {
-    voc_title: "So'zlar", voc_home_title: "So'z yodlash", voc_home_sub: "Kartochkalar, mashqlar, takrorlash", voc_hero_title: "Mening so'zlarim", voc_hero_learned: "Yodlangan so'zlar: {n}", voc_review_btn: "So'zlarni takrorlash ({n})", voc_review_none: "Hozircha takrorlash yo'q", voc_nothing_due: "Hozir takrorlash kerak emas", voc_my_level: "mening darajam", voc_new_chip: "yangi", voc_learned_of: "{m} dan {n} tasi yodlandi", voc_unit_line: "Yodlandi {l} · o'rganyapman {s} · jami {m}", voc_words_n: "So'zlar: {n}", voc_empty: "Hozircha so'zlar yo'q — markaz ularni testlar bilan birga yuklaydi.", voc_all_units: "Barcha unitlar", voc_st_new: "Yangi", voc_st_learning: "O'rganyapman", voc_st_due: "Takrorlash", voc_st_learned: "Yodlandi", voc_how_learn: "Qanday o'rganish", voc_mode_cards: "Kartochkalar", voc_mode_cards_sub: "So'zni ko'rasan, kartani aylantirasan — tarjima", voc_mode_choice: "Tarjimani tanla", voc_mode_choice_sub: "4 ta variant", voc_mode_type: "So'zni yoz", voc_mode_type_sub: "Inglizcha yozasan — eng yaxshi yodlash usuli", voc_round_hint: "Bir raundda {n} ta so'z: avval takrorlash kerak bo'lganlari, keyin yangilari.", voc_word_list: "Unitning barcha so'zlari ({n})", voc_show: "Ko'rsatish", voc_hide: "Yashirish", voc_done_title: "Raund tugadi!", voc_done_first: "Birinchi urinishda to'g'ri: {n} dan {c}", voc_done_learned: "Yangi yodlangan so'zlar: {n}", voc_done_hint: "Xato qilingan so'zlar takrorlashga qaytadi. Yodlangan so'zlar unutilmasligi uchun bir necha kundan keyin qaytadi.", voc_back_unit: "Unitga", voc_again: "Yana raund", voc_repeat_word: "Bu so'z yana", voc_tap_flip: "Tarjimani ko'rish uchun bos", voc_dont_know: "Bilmayman", voc_know: "Bilaman", voc_choose_ru: "Tarjimani tanla", voc_choose_en: "Inglizcha so'zni tanla", voc_right_is: "To'g'ri:", voc_type_prompt: "Inglizcha yoz", voc_first_letter: "Birinchi harf «{l}» · uzunligi {n}", voc_type_ph: "Inglizcha so'z", voc_show_answer: "Bilmayman", voc_check: "Tekshirish", voc_next: "Keyingi",
+    voc_title: "So'zlar", voc_home_title: "So'z yodlash", voc_home_sub: "Kartochkalar, mashqlar, takrorlash", voc_hero_title: "Mening so'zlarim", voc_hero_learned: "Yodlangan so'zlar: {n}", voc_review_btn: "So'zlarni takrorlash ({n})", voc_review_none: "Hozircha takrorlash yo'q", voc_nothing_due: "Hozir takrorlash kerak emas", voc_my_level: "mening darajam", voc_new_chip: "yangi", voc_learned_of: "{m} dan {n} tasi yodlandi", voc_unit_line: "Yodlandi {l} · o'rganyapman {s} · jami {m}", voc_words_n: "So'zlar: {n}", voc_empty: "Faningiz bo'yicha hozircha so'zlar yo'q — markaz ularni testlar bilan birga yuklaydi.", voc_all_units: "Barcha unitlar", voc_st_new: "Yangi", voc_st_learning: "O'rganyapman", voc_st_due: "Takrorlash", voc_st_learned: "Yodlandi", voc_how_learn: "Qanday o'rganish", voc_mode_cards: "Kartochkalar", voc_mode_cards_sub: "So'zni ko'rasan, kartani aylantirasan — tarjima", voc_mode_choice: "Tarjimani tanla", voc_mode_choice_sub: "4 ta variant", voc_mode_type: "So'zni yoz", voc_mode_type_sub: "{l} yozasan — eng yaxshi yodlash usuli", voc_round_hint: "Bir raundda {n} ta so'z: avval takrorlash kerak bo'lganlari, keyin yangilari.", voc_word_list: "Unitning barcha so'zlari ({n})", voc_show: "Ko'rsatish", voc_hide: "Yashirish", voc_done_title: "Raund tugadi!", voc_done_first: "Birinchi urinishda to'g'ri: {n} dan {c}", voc_done_learned: "Yangi yodlangan so'zlar: {n}", voc_done_hint: "Xato qilingan so'zlar takrorlashga qaytadi. Yodlangan so'zlar unutilmasligi uchun bir necha kundan keyin qaytadi.", voc_back_unit: "Unitga", voc_again: "Yana raund", voc_repeat_word: "Bu so'z yana", voc_tap_flip: "Tarjimani ko'rish uchun bos", voc_dont_know: "Bilmayman", voc_know: "Bilaman", voc_choose_ru: "Tarjimani tanla", voc_choose_en: "So'zni tanla ({l})", voc_right_is: "To'g'ri:", voc_type_prompt: "Yoz ({l})", voc_first_letter: "Birinchi harf «{l}» · uzunligi {n}", voc_type_ph: "So'z ({l})", voc_show_answer: "Bilmayman", voc_check: "Tekshirish", voc_next: "Keyingi",
     test_words_n: "{n} ta so'z",
     vocab_ph_ru: "Ruscha tarjima", vocab_ph_en: "English word",
     close: "Yopish", tests_title: "Testlar", tests_sub_todo: "Yangi test", tests_sub_wait: "O'qituvchini kutamiz", tests_sub_done: "Hammasi topshirildi", tests_sub_none: "Hozircha yo'q",
@@ -4463,7 +4482,7 @@ export default function ParentApp() {
           {tab === "home" && screen === "homework" && <HomeworkScreen student={student} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onSubmitQuiz={handleSubmitQuiz} />}
           {tab === "home" && screen === "progress" && <ProgressScreen student={student} t={t} lang={lang} />}
           {tab === "home" && screen === "tests" && <TestsScreen student={student} t={t} lang={lang} api={testsApi} />}
-          {tab === "home" && screen === "words" && <VocabScreen student={student} t={t} api={testsApi} />}
+          {tab === "home" && screen === "words" && <VocabScreen student={student} t={t} lang={lang} api={testsApi} />}
           {tab === "home" && screen === "notices" && <NoticesScreen notifications={student.notifications || []} t={t} lang={lang} />}
           {tab === "schedule" && <ScheduleTab student={student} t={t} lang={lang} />}
           {tab === "rating" && <RatingTab student={student} t={t} />}
