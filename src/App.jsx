@@ -39,6 +39,11 @@ const ICON_NODES = {
   ChevronRight: [["path",{"d":"m9 18 6-6-6-6"}]],
   ChevronLeft: [["path",{"d":"m15 18-6-6 6-6"}]],
   Check: [["path",{"d":"M20 6 9 17l-5-5"}]],
+  Volume2: [["path",{"d":"M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"}],["path",{"d":"M16 9a5 5 0 0 1 0 6"}],["path",{"d":"M19.364 18.364a9 9 0 0 0 0-12.728"}]],
+  Languages: [["path",{"d":"m5 8 6 6"}],["path",{"d":"m4 14 6-6 2-3"}],["path",{"d":"M2 5h12"}],["path",{"d":"M7 2h1"}],["path",{"d":"m22 22-5-10-5 10"}],["path",{"d":"M14 18h6"}]],
+  Layers: [["path",{"d":"M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"}],["path",{"d":"m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"}],["path",{"d":"m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"}]],
+  Keyboard: [["path",{"d":"M10 8h.01"}],["path",{"d":"M12 12h.01"}],["path",{"d":"M14 8h.01"}],["path",{"d":"M16 12h.01"}],["path",{"d":"M18 8h.01"}],["path",{"d":"M6 8h.01"}],["path",{"d":"M7 16h10"}],["path",{"d":"M8 12h.01"}],["rect",{"width":"20","height":"16","x":"2","y":"4","rx":"2"}]],
+  ListChecks: [["path",{"d":"m3 17 2 2 4-4"}],["path",{"d":"m3 7 2 2 4-4"}],["path",{"d":"M13 6h8"}],["path",{"d":"M13 12h8"}],["path",{"d":"M13 18h8"}]],
 };
 function makeIcon(nodes) {
   return function Icon({ size = 24, strokeWidth = 2, color = "currentColor", fill = "none", className = "", style, ...rest }) {
@@ -52,11 +57,12 @@ function makeIcon(nodes) {
 const {
   BookOpen, ClipboardList, Bell, Globe, AlertTriangle, Lock, Bot, Lightbulb, Pin, MessageSquare, Pencil, RotateCcw,
   Sun, Moon, Star, Ban, DoorOpen, Hourglass, Search, Receipt, CreditCard, BarChart3, Dumbbell, ChevronRight, ChevronLeft, Check,
+  Volume2, Languages, Layers, Keyboard, ListChecks,
 } = Object.fromEntries(Object.entries(ICON_NODES).map(([name, nodes]) => [name, makeIcon(nodes)]));
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v24";
+const APP_VERSION = "v25";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
 
@@ -1338,6 +1344,461 @@ function SectionLabel({ children, className = "" }) {
   return <div className={`text-[12px] font-bold uppercase tracking-[0.07em] px-1 mb-2.5 ${className}`} style={{ color: "var(--ink-3)" }}>{children}</div>;
 }
 
+// =============================== СЛОВА: САМОСТОЯТЕЛЬНОЕ ИЗУЧЕНИЕ ===============================
+// Ученик сам выбирает учебник и юнит и учит слова: карточки, «выбери перевод», «напиши слово»,
+// список слов. Интервальное повторение: каждое слово в «коробке» 0–5; верно — коробка +1 и слово
+// вернётся позже (1, 2, 4, 8, 16 дней), ошибка — коробка 0 и слово нужно повторить сразу.
+// Прогресс хранится на сервере (отдельная запись ученика), поэтому не теряется при смене телефона.
+const VOC_DAYS = [0, 1, 2, 4, 8, 16];
+const VOC_LEARNED = 3;
+const VOC_ROUND = 15;
+function vocNorm(s) {
+  return String(s || "").toLowerCase().replace(/[‘’ʼ`´]/g, "'").replace(/[.,!?;:"«»()]/g, " ").replace(/\s+/g, " ").trim().replace(/^to /, "").replace(/^(a|an|the) /, "");
+}
+function vocAccepts(w, given) {
+  const g = vocNorm(given);
+  if (!g) return false;
+  const list = [...(w.enAlts || []), w.en].flatMap((x) => String(x || "").split("/"));
+  return list.some((x) => vocNorm(x) === g);
+}
+function vocSpeak(text) {
+  try {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(String(text || "").split("/")[0]);
+    u.lang = "en-GB"; u.rate = 0.9;
+    const v = (synth.getVoices() || []).find((x) => /^en(-|_)/i.test(x.lang));
+    if (v) u.voice = v;
+    synth.speak(u);
+  } catch {}
+}
+const vocCanSpeak = () => { try { return !!window.speechSynthesis; } catch { return false; } };
+function vocShuffle(a) { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; }
+function vocStatus(p, now) {
+  if (!p) return "new";
+  if (p.d && new Date(p.d).getTime() <= now) return "due";
+  return (p.b || 0) >= VOC_LEARNED ? "learned" : "learning";
+}
+// Слова на раунд: сначала те, что пора повторить, потом новые, потом остальные (по дате повтора).
+function vocPickRound(words, prog, n = VOC_ROUND) {
+  const now = Date.now();
+  const due = [], fresh = [], rest = [];
+  words.forEach((w) => { const st = vocStatus(prog[w.id], now); (st === "due" ? due : st === "new" ? fresh : rest).push(w); });
+  rest.sort((a, b) => new Date(prog[a.id]?.d || 0) - new Date(prog[b.id]?.d || 0));
+  return [...vocShuffle(due), ...fresh, ...rest].slice(0, n);
+}
+
+function SpeakBtn({ text, size = 34, light }) {
+  if (!vocCanSpeak()) return null;
+  return (
+    <button onClick={(e) => { e.stopPropagation(); haptic("light"); vocSpeak(text); }} aria-label="speak" className="rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform"
+      style={{ width: size, height: size, background: light ? "rgba(255,255,255,0.2)" : "var(--soft-blue-bg)", color: light ? "#fff" : BLUE }}>
+      <Volume2 size={Math.round(size * 0.5)} />
+    </button>
+  );
+}
+function VocBar({ value, total, color = GREEN_D, height = 6, soft = 0 }) {
+  // value — выучено (яркая полоса), soft — ещё учу (бледная полоса следом).
+  const pct = total ? Math.min(100, Math.round((value / total) * 100)) : 0;
+  const pctSoft = total ? Math.min(100 - pct, Math.round((soft / total) * 100)) : 0;
+  return (
+    <div className="w-full rounded-full overflow-hidden flex" style={{ height, background: "var(--surface-alt)" }}>
+      <div className="h-full transition-all duration-500" style={{ width: `${pct}%`, background: color }} />
+      {pctSoft > 0 && <div className="h-full transition-all duration-500" style={{ width: `${pctSoft}%`, background: color, opacity: 0.3 }} />}
+    </div>
+  );
+}
+
+// Один раунд тренировки. mode: "cards" | "choice" | "type".
+function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t }) {
+  const [queue, setQueue] = useState(() => words.map((w, i) => ({ w, k: i, dir: mode === "choice" ? (i % 2 ? "ru" : "en") : "en" })));
+  const [pos, setPos] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [picked, setPicked] = useState(null);
+  const [typed, setTyped] = useState("");
+  const [checked, setChecked] = useState(null); // null | true | false
+  const [stats, setStats] = useState({ ok: 0, bad: 0, firstOk: 0, newLearned: 0 });
+  const [firstTry, setFirstTry] = useState({}); // { [wordId]: true/false } — результат первой попытки
+  const inputRef = useRef(null);
+  const cur = queue[pos];
+  const done = pos >= queue.length;
+  const uniqueTotal = words.length;
+  const passed = Object.keys(firstTry).length;
+
+  const options = useMemo(() => {
+    if (!cur || mode !== "choice") return [];
+    const field = cur.dir === "en" ? "ru" : "en";
+    const others = vocShuffle((pool.length >= 4 ? pool : [...pool, ...words]).filter((x) => x.id !== cur.w.id && x[field] !== cur.w[field])).slice(0, 3);
+    return vocShuffle([cur.w, ...others]).map((x) => ({ id: x.id, text: x[field] }));
+  }, [pos, queue]);
+
+  useEffect(() => { if (mode === "type" && inputRef.current && !done) inputRef.current.focus(); }, [pos, done]);
+
+  const answer = (ok) => {
+    const w = cur.w;
+    const first = !(w.id in firstTry);
+    if (first) setFirstTry((f) => ({ ...f, [w.id]: ok }));
+    const wasLearned = (prog[w.id]?.b || 0) >= VOC_LEARNED;
+    const nb = onGrade(w, ok, first);
+    setStats((s) => ({ ok: s.ok + (ok ? 1 : 0), bad: s.bad + (ok ? 0 : 1), firstOk: s.firstOk + (ok && first ? 1 : 0), newLearned: s.newLearned + (!wasLearned && nb >= VOC_LEARNED ? 1 : 0) }));
+    haptic(ok ? "success" : "error");
+    // Ошибка — слово вернётся через 3 карточки (или в конец), пока ученик не ответит верно.
+    if (!ok) setQueue((q) => { const nq = [...q]; nq.splice(Math.min(pos + 4, nq.length), 0, { ...cur, k: cur.k + 1000 + pos }); return nq; });
+  };
+  const next = () => { setPos((p) => p + 1); setFlipped(false); setPicked(null); setTyped(""); setChecked(null); };
+
+  if (done) {
+    const firstOk = Object.values(firstTry).filter(Boolean).length;
+    const pct = uniqueTotal ? Math.round((firstOk / uniqueTotal) * 100) : 0;
+    return (
+      <div className="anim-fade">
+        <PlainCard className="py-6 text-center">
+          <div className="text-[44px] leading-none">{pct >= 90 ? "🏆" : pct >= 60 ? "👏" : "💪"}</div>
+          <div className="text-[20px] font-extrabold mt-3">{t("voc_done_title")}</div>
+          <div className="text-[13.5px] mt-1" style={{ color: "var(--ink-sub)" }}>{t("voc_done_first", { c: firstOk, n: uniqueTotal })}</div>
+          <div className="mt-4 px-6"><VocBar value={firstOk} total={uniqueTotal} height={8} color={pct >= 60 ? GREEN_D : "#EA580C"} /></div>
+          {stats.newLearned > 0 && <div className="mt-3"><Chip tone="green">⭐ {t("voc_done_learned", { n: stats.newLearned })}</Chip></div>}
+          <div className="text-[12px] mt-3 px-4" style={{ color: "var(--ink-3)" }}>{t("voc_done_hint")}</div>
+        </PlainCard>
+        <div className="grid grid-cols-2 gap-2.5 mt-3">
+          <button onClick={() => { haptic("light"); onExit(); }} className="py-3.5 rounded-[18px] text-[14px] font-bold" style={{ background: "var(--surface)", color: "var(--ink)", boxShadow: "0 4px 16px rgba(26,26,23,0.06)" }}>{t("voc_back_unit")}</button>
+          <button onClick={() => { haptic("light"); onAgain(); }} className="py-3.5 rounded-[18px] text-[14px] font-bold text-white" style={{ background: RED }}>{t("voc_again")}</button>
+        </div>
+      </div>
+    );
+  }
+
+  const w = cur.w;
+  const top = (
+    <div className="flex items-center gap-3 mb-3">
+      <button onClick={() => { haptic("light"); onExit(); }} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface)", boxShadow: "0 2px 8px rgba(26,26,23,0.08)" }} aria-label="close"><X size={17} /></button>
+      <div className="flex-1"><VocBar value={passed} total={uniqueTotal} color={BLUE} height={8} /></div>
+      <div className="text-[12.5px] font-bold shrink-0" style={{ color: "var(--ink-sub)" }}>{Math.min(passed + (w.id in firstTry ? 0 : 1), uniqueTotal)}/{uniqueTotal}</div>
+    </div>
+  );
+  const repeatTag = cur.k >= 1000 ? <div className="text-center mb-2"><Chip tone="yellow">{t("voc_repeat_word")}</Chip></div> : null;
+
+  if (mode === "cards") {
+    return (
+      <div className="anim-fade">
+        {top}{repeatTag}
+        <button onClick={() => { haptic("light"); setFlipped((f) => !f); }} className="w-full rounded-[28px] px-5 text-center flex flex-col items-center justify-center active:scale-[0.99] transition-transform"
+          style={{ minHeight: 280, background: flipped ? "var(--surface)" : `linear-gradient(150deg, ${BLUE}, #1E40AF)`, color: flipped ? "var(--ink)" : "#fff", boxShadow: "0 10px 30px rgba(26,26,23,0.12)" }}>
+          <div className="text-[30px] font-extrabold leading-tight break-words">{w.en}</div>
+          {w.tr && <div className="text-[16px] mt-1.5" style={{ opacity: 0.8 }}>{w.tr}</div>}
+          <div className="mt-3"><SpeakBtn text={w.en} size={42} light={!flipped} /></div>
+          {flipped ? (
+            <div className="mt-5 pt-4 w-full" style={{ borderTop: `1px dashed ${LINE}` }}>
+              <div className="text-[22px] font-bold leading-snug" style={{ color: GREEN_D }}>{w.ru}</div>
+            </div>
+          ) : (
+            <div className="mt-6 text-[12.5px] font-semibold" style={{ opacity: 0.75 }}>👆 {t("voc_tap_flip")}</div>
+          )}
+        </button>
+        <div className="grid grid-cols-2 gap-2.5 mt-3">
+          <button onClick={() => { answer(false); next(); }} className="py-4 rounded-[18px] text-[15px] font-bold" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>😕 {t("voc_dont_know")}</button>
+          <button onClick={() => { answer(true); next(); }} className="py-4 rounded-[18px] text-[15px] font-bold" style={{ background: "var(--soft-green-bg)", color: "var(--soft-green-fg)" }}>😊 {t("voc_know")}</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === "choice") {
+    const correctText = cur.dir === "en" ? w.ru : w.en;
+    const choose = (o) => {
+      if (picked) return;
+      const ok = o.id === w.id;
+      setPicked(o.id); answer(ok);
+      setTimeout(next, ok ? 750 : 1700);
+    };
+    return (
+      <div className="anim-fade">
+        {top}{repeatTag}
+        <PlainCard className="py-6 text-center">
+          <div className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--ink-3)" }}>{cur.dir === "en" ? t("voc_choose_ru") : t("voc_choose_en")}</div>
+          <div className="text-[26px] font-extrabold mt-2 leading-tight break-words">{cur.dir === "en" ? w.en : w.ru}</div>
+          {cur.dir === "en" && w.tr && <div className="text-[15px] mt-1" style={{ color: "var(--ink-sub)" }}>{w.tr}</div>}
+          {cur.dir === "en" && <div className="mt-3 flex justify-center"><SpeakBtn text={w.en} /></div>}
+        </PlainCard>
+        <div className="space-y-2 mt-3">
+          {options.map((o) => {
+            const isRight = o.id === w.id;
+            const st = !picked ? "idle" : isRight ? "right" : picked === o.id ? "wrong" : "dim";
+            return (
+              <button key={o.id} onClick={() => choose(o)} className="w-full px-4 py-3.5 rounded-[18px] text-left text-[15px] font-semibold flex items-center gap-2 transition-all active:scale-[0.98]"
+                style={{ background: st === "right" ? "var(--soft-green-bg)" : st === "wrong" ? "var(--soft-red-bg)" : "var(--surface)", color: st === "right" ? "var(--soft-green-fg)" : st === "wrong" ? "var(--soft-red-fg)" : "var(--ink)", opacity: st === "dim" ? 0.5 : 1, boxShadow: "0 3px 12px rgba(26,26,23,0.06)", border: `1.5px solid ${st === "right" ? GREEN_D : st === "wrong" ? RED : "transparent"}` }}>
+                <span className="flex-1 break-words">{o.text}</span>
+                {st === "right" && <CheckCircle2 size={18} />}
+                {st === "wrong" && <XCircle size={18} />}
+              </button>
+            );
+          })}
+        </div>
+        {picked && picked !== w.id && <div className="text-center text-[12.5px] mt-3" style={{ color: "var(--ink-sub)" }}>{t("voc_right_is")} <b style={{ color: GREEN_D }}>{correctText}</b></div>}
+      </div>
+    );
+  }
+
+  // mode === "type": показываем перевод — ученик пишет английское слово.
+  const check = () => {
+    if (checked !== null) { next(); return; }
+    if (!typed.trim()) return;
+    const ok = vocAccepts(w, typed);
+    setChecked(ok); answer(ok);
+    if (ok) { vocSpeak(w.en); setTimeout(next, 900); }
+  };
+  return (
+    <div className="anim-fade">
+      {top}{repeatTag}
+      <PlainCard className="py-6 text-center">
+        <div className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--ink-3)" }}>{t("voc_type_prompt")}</div>
+        <div className="text-[24px] font-extrabold mt-2 leading-tight break-words">{w.ru}</div>
+        <div className="text-[12px] mt-1.5" style={{ color: "var(--ink-3)" }}>{t("voc_first_letter", { l: String(w.en || "?").trim()[0] || "?", n: String(w.en || "").split("/")[0].trim().length })}</div>
+      </PlainCard>
+      <input ref={inputRef} value={typed} onChange={(e) => { if (checked === null) setTyped(e.target.value); }} onKeyDown={(e) => { if (e.key === "Enter") check(); }}
+        autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={t("voc_type_ph")}
+        className="w-full mt-3 px-4 py-4 rounded-[18px] text-[18px] font-semibold text-center outline-none"
+        style={{ background: checked === true ? "var(--soft-green-bg)" : checked === false ? "var(--soft-red-bg)" : "var(--surface)", color: "var(--ink)", border: `1.5px solid ${checked === true ? GREEN_D : checked === false ? RED : LINE}` }} />
+      {checked === false && (
+        <div className="mt-3 p-3.5 rounded-[18px] flex items-center gap-3" style={{ background: "var(--surface)" }}>
+          <div className="flex-1 min-w-0">
+            <div className="text-[11.5px]" style={{ color: "var(--ink-3)" }}>{t("voc_right_is")}</div>
+            <div className="text-[19px] font-extrabold" style={{ color: GREEN_D }}>{w.en} <span className="text-[13px] font-medium" style={{ color: "var(--ink-sub)" }}>{w.tr}</span></div>
+          </div>
+          <SpeakBtn text={w.en} />
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2.5 mt-3">
+        <button onClick={() => { if (checked === null) { setChecked(false); answer(false); } else next(); }} className="py-3.5 rounded-[18px] text-[14px] font-bold" style={{ background: "var(--surface)", color: "var(--ink-sub)" }}>{checked === null ? t("voc_show_answer") : t("voc_next")}</button>
+        <button onClick={check} disabled={checked === null && !typed.trim()} className="py-3.5 rounded-[18px] text-[14px] font-bold text-white" style={{ background: RED, opacity: checked === null && !typed.trim() ? 0.5 : 1 }}>{checked === null ? t("voc_check") : t("voc_next")}</button>
+      </div>
+    </div>
+  );
+}
+
+function VocabScreen({ student, t, api }) {
+  const [lib, setLib] = useState(null);
+  const [err, setErr] = useState("");
+  const [book, setBook] = useState(null);
+  const [unit, setUnit] = useState(null); // { testId, title, bookTitle, words, progress }
+  const [prog, setProg] = useState({}); // прогресс открытого юнита / повторения: { [testId]: { [wordId]: p } }
+  const [session, setSession] = useState(null); // { mode, words, pool, key }
+  const [listOpen, setListOpen] = useState(false);
+  const [loadingUnit, setLoadingUnit] = useState(null);
+  const pendingRef = useRef({}); // ещё не сохранённые изменения
+  const timerRef = useRef(null);
+
+  const loadLib = async () => {
+    setErr("");
+    const res = await api({ vocabStudy: { studentId: student.id, op: "library" } });
+    if (res?.error) { setErr(res.error); return; }
+    const v = res?.vocab || { books: [], totals: { due: 0, learned: 0 } };
+    setLib(v);
+    setBook((b) => b && v.books.some((x) => x.book === b) ? b : (v.books[0]?.book || null));
+  };
+  useEffect(() => { loadLib(); }, [student.id]);
+
+  const flush = async () => {
+    const changes = pendingRef.current;
+    if (!Object.keys(changes).length) return;
+    pendingRef.current = {};
+    const res = await api({ vocabStudy: { studentId: student.id, op: "save", progress: changes } });
+    if (res?.error) { // не получилось — вернём в очередь, сохраним в следующий раз
+      Object.entries(changes).forEach(([tid, ws]) => { pendingRef.current[tid] = { ...ws, ...(pendingRef.current[tid] || {}) }; });
+    }
+  };
+  useEffect(() => () => { clearTimeout(timerRef.current); flush(); }, []);
+  const scheduleFlush = () => { clearTimeout(timerRef.current); timerRef.current = setTimeout(flush, 2500); };
+
+  const grade = (w, ok, first) => {
+    const tid = w.testId || unit?.testId;
+    const p = (prog[tid] || {})[w.id] || { b: 0, n: 0, w: 0 };
+    // Повторная попытка в том же раунде (после ошибки) коробку не поднимает — слово просто закрепляется.
+    // Коробка растёт, только если слово новое или его как раз пора повторять — так «выучено»
+    // означает, что слово вспомнилось через несколько дней, а не три раза подряд за вечер.
+    const st = vocStatus((prog[tid] || {})[w.id], Date.now());
+    const b = ok ? (first && (st === "new" || st === "due") ? Math.min(5, (p.b || 0) + 1) : Math.max(1, p.b || 0)) : 0;
+    const d = new Date(Date.now() + VOC_DAYS[b] * 86400000 - (b === 0 ? 0 : 3600000)).toISOString();
+    const np = { b, d, n: (p.n || 0) + 1, w: (p.w || 0) + (ok ? 0 : 1) };
+    setProg((all) => ({ ...all, [tid]: { ...(all[tid] || {}), [w.id]: np } }));
+    pendingRef.current[tid] = { ...(pendingRef.current[tid] || {}), [w.id]: np };
+    scheduleFlush();
+    return b;
+  };
+
+  const openUnit = async (u) => {
+    haptic("light"); setLoadingUnit(u.testId); setErr("");
+    const res = await api({ vocabStudy: { studentId: student.id, op: "unit", testId: u.testId } });
+    setLoadingUnit(null);
+    if (res?.error) { setErr(res.error); return; }
+    setUnit(res.vocab); setProg((p) => ({ ...p, [res.vocab.testId]: { ...(res.vocab.progress || {}), ...(p[res.vocab.testId] || {}) } })); setListOpen(false);
+    try { window.scrollTo({ top: 0 }); } catch {}
+  };
+  const startReview = async () => {
+    haptic("light"); setLoadingUnit("review"); setErr("");
+    const res = await api({ vocabStudy: { studentId: student.id, op: "review" } });
+    setLoadingUnit(null);
+    if (res?.error) { setErr(res.error); return; }
+    const v = res.vocab;
+    if (!v.words?.length) { setErr(t("voc_nothing_due")); return; }
+    setProg((p) => { const n = { ...p }; Object.entries(v.progress || {}).forEach(([tid, ws]) => { n[tid] = { ...ws, ...(p[tid] || {}) }; }); return n; });
+    setSession({ mode: "choice", words: vocShuffle(v.words).slice(0, 20), pool: v.words, key: Date.now(), review: true });
+  };
+  const startMode = (mode) => {
+    haptic("light");
+    const up = prog[unit.testId] || {};
+    setSession({ mode, words: vocPickRound(unit.words, up), pool: unit.words, key: Date.now() });
+    try { window.scrollTo({ top: 0 }); } catch {}
+  };
+  const closeSession = async () => {
+    const wasReview = session?.review;
+    setSession(null);
+    await flush();
+    if (wasReview || !unit) loadLib();
+  };
+  const backToLibrary = async () => { haptic("light"); setUnit(null); await flush(); loadLib(); };
+
+  // ---- Тренировка идёт ----
+  if (session) {
+    const flatProg = session.review ? Object.assign({}, ...Object.values(prog)) : (prog[unit?.testId] || {});
+    return (
+      <VocabSession key={session.key} words={session.words} pool={session.pool} mode={session.mode} prog={flatProg} onGrade={grade} t={t}
+        onExit={closeSession}
+        onAgain={() => setSession((s) => ({ ...s, key: Date.now(), words: s.review ? vocShuffle(s.pool).slice(0, 20) : vocPickRound(unit.words, prog[unit.testId] || {}) }))} />
+    );
+  }
+
+  // ---- Открыт юнит ----
+  if (unit) {
+    const up = prog[unit.testId] || {};
+    const now = Date.now();
+    const counts = { new: 0, learning: 0, learned: 0, due: 0 };
+    unit.words.forEach((w) => { counts[vocStatus(up[w.id], now)]++; });
+    const learnedTotal = unit.words.filter((w) => (up[w.id]?.b || 0) >= VOC_LEARNED).length;
+    const modes = [
+      { mode: "cards", icon: Layers, bg: "var(--soft-blue-bg)", color: BLUE, title: t("voc_mode_cards"), sub: t("voc_mode_cards_sub") },
+      { mode: "choice", icon: ListChecks, bg: "var(--soft-purple-bg)", color: PURPLE, title: t("voc_mode_choice"), sub: t("voc_mode_choice_sub") },
+      { mode: "type", icon: Keyboard, bg: "var(--soft-green-bg)", color: GREEN_D, title: t("voc_mode_type"), sub: t("voc_mode_type_sub") },
+    ];
+    const dot = { new: "var(--ink-3)", learning: "#EA580C", learned: GREEN_D, due: RED };
+    return (
+      <div className="anim-fade">
+        <button onClick={backToLibrary} className="flex items-center gap-1 text-[13px] font-bold mb-3" style={{ color: "var(--ink-sub)" }}><ChevronLeft size={16} />{t("voc_all_units")}</button>
+        <PlainCard className="py-4">
+          <div className="text-[12px] font-semibold" style={{ color: "var(--ink-3)" }}>{unit.bookTitle}</div>
+          <div className="text-[22px] font-extrabold leading-tight">{unit.title}</div>
+          <div className="mt-3"><VocBar value={learnedTotal} soft={counts.learning + counts.due} total={unit.words.length} height={8} /></div>
+          <div className="text-[12.5px] mt-1.5" style={{ color: "var(--ink-sub)" }}>{t("voc_unit_line", { l: learnedTotal, s: counts.learning + counts.due, m: unit.words.length })}</div>
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            <Chip tone="neutral">🆕 {t("voc_st_new")}: {counts.new}</Chip>
+            <Chip tone="yellow">📖 {t("voc_st_learning")}: {counts.learning}</Chip>
+            {counts.due > 0 && <Chip tone="red">🔁 {t("voc_st_due")}: {counts.due}</Chip>}
+            <Chip tone="green">⭐ {t("voc_st_learned")}: {counts.learned}</Chip>
+          </div>
+        </PlainCard>
+
+        <SectionLabel className="mt-5">{t("voc_how_learn")}</SectionLabel>
+        <div className="space-y-2.5">
+          {modes.map((m) => (
+            <button key={m.mode} onClick={() => startMode(m.mode)} className="w-full rounded-[20px] px-4 py-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 4px 16px rgba(26,26,23,0.06)" }}>
+              <IconTile icon={m.icon} bg={m.bg} color={m.color} size={44} iconSize={21} radius={14} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[15px] font-bold">{m.title}</div>
+                <div className="text-[12px]" style={{ color: "var(--ink-sub)" }}>{m.sub}</div>
+              </div>
+              <ChevronRight size={18} style={{ color: "var(--ink-3)" }} />
+            </button>
+          ))}
+        </div>
+        <div className="text-[11.5px] px-1 mt-2" style={{ color: "var(--ink-3)" }}>{t("voc_round_hint", { n: Math.min(VOC_ROUND, unit.words.length) })}</div>
+
+        <button onClick={() => { haptic("light"); setListOpen((v) => !v); }} className="w-full mt-5 flex items-center justify-between px-1">
+          <SectionLabel className="!mb-0">{t("voc_word_list", { n: unit.words.length })}</SectionLabel>
+          <span className="text-[12.5px] font-bold" style={{ color: RED }}>{listOpen ? t("voc_hide") : t("voc_show")}</span>
+        </button>
+        {listOpen && (
+          <PlainCard className="py-1.5 mt-2.5">
+            {unit.words.map((w, i) => {
+              const st = vocStatus(up[w.id], now);
+              return (
+                <div key={w.id} className="flex items-center gap-3 py-2.5" style={{ borderTop: i ? `1px solid ${LINE}` : "none" }}>
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: dot[st] }} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[14.5px] font-bold break-words">{w.en} <span className="text-[12px] font-medium" style={{ color: "var(--ink-sub)" }}>{w.tr}</span></div>
+                    <div className="text-[13px] break-words" style={{ color: "var(--ink-2)" }}>{w.ru}</div>
+                  </div>
+                  <SpeakBtn text={w.en} size={32} />
+                </div>
+              );
+            })}
+          </PlainCard>
+        )}
+        {err && <div className="text-[12.5px] mt-3 text-center" style={{ color: RED }}>{err}</div>}
+      </div>
+    );
+  }
+
+  // ---- Список учебников и юнитов ----
+  if (!lib) {
+    return err ? <PlainCard><EmptyState text={err} /></PlainCard> : <div className="flex justify-center py-16"><Loader2 size={24} className="animate-spin" style={{ color: RED }} /></div>;
+  }
+  if (!lib.books.length) return <PlainCard><EmptyState text={t("voc_empty")} emoji="📚" /></PlainCard>;
+  const cur = lib.books.find((b) => b.book === book) || lib.books[0];
+  const due = lib.totals?.due || 0;
+  return (
+    <div className="anim-fade">
+      <div className="rounded-[24px] p-4 text-white" style={{ background: `linear-gradient(140deg, ${PURPLE}, #4C1D95)`, boxShadow: "0 10px 26px rgba(76,29,149,0.25)" }}>
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-[14px] flex items-center justify-center shrink-0" style={{ background: "rgba(255,255,255,0.18)" }}><Languages size={22} /></div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[17px] font-extrabold leading-tight">{t("voc_hero_title")}</div>
+            <div className="text-[12px] mt-0.5" style={{ color: "rgba(255,255,255,0.8)" }}>{t("voc_hero_learned", { n: lib.totals?.learned || 0 })}</div>
+          </div>
+        </div>
+        <button onClick={startReview} disabled={!due || loadingUnit === "review"} className="w-full mt-3.5 py-3 rounded-[16px] text-[14.5px] font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+          style={{ background: due ? "#fff" : "rgba(255,255,255,0.16)", color: due ? PURPLE : "rgba(255,255,255,0.85)" }}>
+          {loadingUnit === "review" ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}
+          {due ? t("voc_review_btn", { n: due }) : t("voc_review_none")}
+        </button>
+      </div>
+
+      {lib.books.length > 1 && (
+        <div className="flex gap-2 overflow-x-auto mt-4 -mx-4 px-4 pb-1" style={{ scrollbarWidth: "none" }}>
+          {lib.books.map((b) => (
+            <button key={b.book} onClick={() => { haptic("light"); setBook(b.book); }} className="shrink-0 px-3.5 py-2 rounded-full text-[12.5px] font-bold whitespace-nowrap"
+              style={{ background: cur.book === b.book ? "var(--ink)" : "var(--surface)", color: cur.book === b.book ? "var(--surface)" : "var(--ink)", boxShadow: "0 2px 8px rgba(26,26,23,0.06)" }}>
+              {String(b.bookTitle).replace(/^New Headway\s*/i, "") || b.bookTitle} · {b.level}{b.recommended ? " ★" : ""}
+            </button>
+          ))}
+        </div>
+      )}
+      <SectionLabel className="mt-4">{cur.bookTitle}{cur.recommended ? ` · ${t("voc_my_level")}` : ""}</SectionLabel>
+      {err && <div className="text-[12.5px] mb-2 text-center" style={{ color: RED }}>{err}</div>}
+      <div className="space-y-2">
+        {cur.units.map((u) => {
+          const allDone = u.total > 0 && u.learned >= u.total;
+          return (
+            <button key={u.testId} onClick={() => openUnit(u)} className="w-full rounded-[20px] px-4 py-3.5 text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 4px 16px rgba(26,26,23,0.06)" }}>
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-[14px] flex items-center justify-center shrink-0 text-[15px] font-black" style={{ background: allDone ? "var(--soft-green-bg)" : "var(--soft-purple-bg)", color: allDone ? GREEN_D : PURPLE }}>{allDone ? <Check size={20} /> : u.unit}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <div className="text-[15px] font-bold flex-1 truncate">{String(u.title || "").replace(/\s*·\s*(Слова|Words|So'zlar)\s*$/i, "") || `Unit ${u.unit}`}</div>
+                    {loadingUnit === u.testId ? <Loader2 size={15} className="animate-spin" style={{ color: PURPLE }} /> : u.due > 0 ? <Chip tone="red">🔁 {u.due}</Chip> : u.seen === 0 ? <Chip tone="blue">{t("voc_new_chip")}</Chip> : null}
+                  </div>
+                  <div className="mt-1.5"><VocBar value={u.learned} soft={Math.max(0, u.seen - u.learned)} total={u.total} /></div>
+                  <div className="text-[11.5px] mt-1" style={{ color: "var(--ink-sub)" }}>{u.seen ? t("voc_unit_line", { l: u.learned, s: Math.max(0, u.seen - u.learned), m: u.total }) : t("voc_words_n", { n: u.total })}</div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // =============================== ТЕСТЫ ПО ЮНИТАМ ===============================
 // Учитель открывает тест группе → ученик проходит его по упражнениям (у каждого — объяснение, что
 // делать) → сервер проверяет и считает баллы → отдельный экран результата. Проходной — 80%.
@@ -2233,6 +2694,14 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
           badge={testsTodo > 0 ? <Chip tone="red">{testsTodo}</Chip> : testsAll > 0 && testsTodo === 0 && !testsWaiting ? <CheckCircle2 size={17} style={{ color: GREEN_D }} /> : null} />
         <SquareTile icon={TrendingUp} tile="var(--soft-green-bg)" color={GREEN_D} title={t("progress_short")} sub={progSub} onClick={() => onOpenScreen("progress")} />
       </div>
+      <button onClick={() => { haptic("light"); onOpenScreen("words"); }} className="w-full mt-3 rounded-[20px] px-4 py-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 4px 16px rgba(26,26,23,0.06)" }}>
+        <IconTile icon={Languages} bg="var(--soft-purple-bg)" color={PURPLE} size={42} iconSize={21} radius={13} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[14.5px] font-bold">{t("voc_home_title")}</div>
+          <div className="text-[11.5px] mt-0.5 truncate" style={{ color: "var(--ink-sub)" }}>{t("voc_home_sub")}</div>
+        </div>
+        <ChevronRight size={18} style={{ color: "var(--ink-3)" }} />
+      </button>
 
       {/* Сервис — тоже квадратные плитки */}
       <SectionLabel className="mt-6">{t("service_section_title")}</SectionLabel>
@@ -3051,6 +3520,7 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
 /* ----------------------------------- Переводы ----------------------------------- */
 const TRANSLATIONS = {
   ru: {
+    voc_title: "Слова", voc_home_title: "Учить слова", voc_home_sub: "Карточки, тренировки, повторение", voc_hero_title: "Мои слова", voc_hero_learned: "Выучено слов: {n}", voc_review_btn: "Повторить слова ({n})", voc_review_none: "Повторять пока нечего", voc_nothing_due: "Сейчас нечего повторять", voc_my_level: "мой уровень", voc_new_chip: "новый", voc_learned_of: "Выучено {n} из {m}", voc_unit_line: "Выучено {l} · учу {s} · всего {m}", voc_words_n: "Слов: {n}", voc_empty: "Слов пока нет — их загружает центр вместе с тестами.", voc_all_units: "Все юниты", voc_st_new: "Новые", voc_st_learning: "Учу", voc_st_due: "Повторить", voc_st_learned: "Выучено", voc_how_learn: "Как учить", voc_mode_cards: "Карточки", voc_mode_cards_sub: "Смотришь слово, переворачиваешь — видишь перевод", voc_mode_choice: "Выбери перевод", voc_mode_choice_sub: "4 варианта ответа", voc_mode_type: "Напиши слово", voc_mode_type_sub: "Пишешь по-английски — так лучше всего запоминается", voc_round_hint: "В одном раунде {n} слов: сначала те, что пора повторить, потом новые.", voc_word_list: "Все слова юнита ({n})", voc_show: "Показать", voc_hide: "Скрыть", voc_done_title: "Раунд пройден!", voc_done_first: "С первого раза верно: {c} из {n}", voc_done_learned: "Выучено новых слов: {n}", voc_done_hint: "Слова с ошибками вернутся на повторение. Выученные слова приложение напомнит повторить через несколько дней, чтобы не забылись.", voc_back_unit: "К юниту", voc_again: "Ещё раунд", voc_repeat_word: "Ещё раз это слово", voc_tap_flip: "Нажми, чтобы увидеть перевод", voc_dont_know: "Не знаю", voc_know: "Знаю", voc_choose_ru: "Выбери перевод", voc_choose_en: "Выбери английское слово", voc_right_is: "Правильно:", voc_type_prompt: "Напиши по-английски", voc_first_letter: "Первая буква «{l}» · длина {n}", voc_type_ph: "Английское слово", voc_show_answer: "Не знаю", voc_check: "Проверить", voc_next: "Дальше",
     test_words_n: "{n} слов",
     vocab_ph_ru: "Перевод на русском", vocab_ph_en: "English word",
     close: "Закрыть", tests_title: "Тесты", tests_sub_todo: "Есть тест", tests_sub_wait: "Ждём учителя", tests_sub_done: "Всё сдано", tests_sub_none: "Пока нет",
@@ -3171,6 +3641,7 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Победы на олимпиадах, высокие баллы на тестах и другие достижения.",
   },
   en: {
+    voc_title: "Words", voc_home_title: "Learn words", voc_home_sub: "Flashcards, practice, review", voc_hero_title: "My words", voc_hero_learned: "Words learned: {n}", voc_review_btn: "Review words ({n})", voc_review_none: "Nothing to review yet", voc_nothing_due: "Nothing to review right now", voc_my_level: "my level", voc_new_chip: "new", voc_learned_of: "Learned {n} of {m}", voc_unit_line: "Learned {l} · learning {s} · total {m}", voc_words_n: "Words: {n}", voc_empty: "No words yet — the centre uploads them together with the tests.", voc_all_units: "All units", voc_st_new: "New", voc_st_learning: "Learning", voc_st_due: "Review", voc_st_learned: "Learned", voc_how_learn: "How to learn", voc_mode_cards: "Flashcards", voc_mode_cards_sub: "See the word, flip the card — see the translation", voc_mode_choice: "Choose the translation", voc_mode_choice_sub: "4 options", voc_mode_type: "Type the word", voc_mode_type_sub: "Type it in English — the best way to remember", voc_round_hint: "One round has {n} words: first the ones due for review, then new ones.", voc_word_list: "All unit words ({n})", voc_show: "Show", voc_hide: "Hide", voc_done_title: "Round complete!", voc_done_first: "Right the first time: {c} of {n}", voc_done_learned: "New words learned: {n}", voc_done_hint: "Words you got wrong will come back for review. Learned words will come back in a few days so you don't forget them.", voc_back_unit: "Back to unit", voc_again: "Another round", voc_repeat_word: "This word again", voc_tap_flip: "Tap to see the translation", voc_dont_know: "Don't know", voc_know: "Know it", voc_choose_ru: "Choose the translation", voc_choose_en: "Choose the English word", voc_right_is: "Correct:", voc_type_prompt: "Type it in English", voc_first_letter: "Starts with “{l}” · length {n}", voc_type_ph: "English word", voc_show_answer: "Don't know", voc_check: "Check", voc_next: "Next",
     test_words_n: "{n} words",
     vocab_ph_ru: "Russian translation", vocab_ph_en: "English word",
     close: "Close", tests_title: "Tests", tests_sub_todo: "New test", tests_sub_wait: "Waiting for teacher", tests_sub_done: "All done", tests_sub_none: "None yet",
@@ -3291,6 +3762,7 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Wins at olympiads, high test scores, and other achievements.",
   },
   uz: {
+    voc_title: "So'zlar", voc_home_title: "So'z yodlash", voc_home_sub: "Kartochkalar, mashqlar, takrorlash", voc_hero_title: "Mening so'zlarim", voc_hero_learned: "Yodlangan so'zlar: {n}", voc_review_btn: "So'zlarni takrorlash ({n})", voc_review_none: "Hozircha takrorlash yo'q", voc_nothing_due: "Hozir takrorlash kerak emas", voc_my_level: "mening darajam", voc_new_chip: "yangi", voc_learned_of: "{m} dan {n} tasi yodlandi", voc_unit_line: "Yodlandi {l} · o'rganyapman {s} · jami {m}", voc_words_n: "So'zlar: {n}", voc_empty: "Hozircha so'zlar yo'q — markaz ularni testlar bilan birga yuklaydi.", voc_all_units: "Barcha unitlar", voc_st_new: "Yangi", voc_st_learning: "O'rganyapman", voc_st_due: "Takrorlash", voc_st_learned: "Yodlandi", voc_how_learn: "Qanday o'rganish", voc_mode_cards: "Kartochkalar", voc_mode_cards_sub: "So'zni ko'rasan, kartani aylantirasan — tarjima", voc_mode_choice: "Tarjimani tanla", voc_mode_choice_sub: "4 ta variant", voc_mode_type: "So'zni yoz", voc_mode_type_sub: "Inglizcha yozasan — eng yaxshi yodlash usuli", voc_round_hint: "Bir raundda {n} ta so'z: avval takrorlash kerak bo'lganlari, keyin yangilari.", voc_word_list: "Unitning barcha so'zlari ({n})", voc_show: "Ko'rsatish", voc_hide: "Yashirish", voc_done_title: "Raund tugadi!", voc_done_first: "Birinchi urinishda to'g'ri: {n} dan {c}", voc_done_learned: "Yangi yodlangan so'zlar: {n}", voc_done_hint: "Xato qilingan so'zlar takrorlashga qaytadi. Yodlangan so'zlar unutilmasligi uchun bir necha kundan keyin qaytadi.", voc_back_unit: "Unitga", voc_again: "Yana raund", voc_repeat_word: "Bu so'z yana", voc_tap_flip: "Tarjimani ko'rish uchun bos", voc_dont_know: "Bilmayman", voc_know: "Bilaman", voc_choose_ru: "Tarjimani tanla", voc_choose_en: "Inglizcha so'zni tanla", voc_right_is: "To'g'ri:", voc_type_prompt: "Inglizcha yoz", voc_first_letter: "Birinchi harf «{l}» · uzunligi {n}", voc_type_ph: "Inglizcha so'z", voc_show_answer: "Bilmayman", voc_check: "Tekshirish", voc_next: "Keyingi",
     test_words_n: "{n} ta so'z",
     vocab_ph_ru: "Ruscha tarjima", vocab_ph_en: "English word",
     close: "Yopish", tests_title: "Testlar", tests_sub_todo: "Yangi test", tests_sub_wait: "O'qituvchini kutamiz", tests_sub_done: "Hammasi topshirildi", tests_sub_none: "Hozircha yo'q",
@@ -3927,7 +4399,7 @@ export default function ParentApp() {
         {screen ? (
           <div className="flex items-center gap-2.5 min-w-0">
             <button onClick={() => { haptic("light"); setScreen(null); }} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={GLASS_BTN} aria-label={t("back")}><ChevronLeft size={20} /></button>
-            <div className="text-[18px] font-extrabold truncate">{screen === "homework" ? t("homework") : screen === "progress" ? t("progress_title") : screen === "tests" ? t("tests_title") : t("notices_title")}</div>
+            <div className="text-[18px] font-extrabold truncate">{screen === "homework" ? t("homework") : screen === "progress" ? t("progress_title") : screen === "tests" ? t("tests_title") : screen === "words" ? t("voc_title") : t("notices_title")}</div>
           </div>
         ) : (
         <div className="flex items-center gap-2.5 min-w-0">
@@ -3991,6 +4463,7 @@ export default function ParentApp() {
           {tab === "home" && screen === "homework" && <HomeworkScreen student={student} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onSubmitQuiz={handleSubmitQuiz} />}
           {tab === "home" && screen === "progress" && <ProgressScreen student={student} t={t} lang={lang} />}
           {tab === "home" && screen === "tests" && <TestsScreen student={student} t={t} lang={lang} api={testsApi} />}
+          {tab === "home" && screen === "words" && <VocabScreen student={student} t={t} api={testsApi} />}
           {tab === "home" && screen === "notices" && <NoticesScreen notifications={student.notifications || []} t={t} lang={lang} />}
           {tab === "schedule" && <ScheduleTab student={student} t={t} lang={lang} />}
           {tab === "rating" && <RatingTab student={student} t={t} />}
