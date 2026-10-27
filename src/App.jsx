@@ -62,7 +62,7 @@ const {
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v26";
+const APP_VERSION = "v27";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
 
@@ -1377,13 +1377,40 @@ function vocAccepts(w, given) {
   const list = [...(w.enAlts || []), w.en].flatMap((x) => String(x || "").split("/"));
   return list.some((x) => vocNorm(x, w.lang) === g);
 }
-function vocSpeak(text, lang = "en") {
+// ---- Произношение ----
+// Голос телефона (speechSynthesis) есть не везде: на части Android его нет, на iPhone в беззвучном
+// режиме он молчит. Поэтому сначала играем настоящий аудиофайл слова (сервер делает его один раз и
+// хранит), если его ещё нет — голос Google, и только если и он не сработал — голос телефона.
+const VocAudio = { el: null, urls: {}, pending: {}, seq: 0, unlocked: false };
+const VOC_SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+// Чистим слово так же, как сервер: первый вариант до «/», без скобок и «sb/sth».
+function vocClean(text) {
+  return String(text || "").split("/")[0].replace(/\([^)]*\)/g, " ").replace(/\b(sb|sth|smb|smth)\b\.?/gi, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+}
+const vocAudioKey = (lang, text) => `${lang || "en"}|${vocClean(text).toLowerCase()}`;
+function vocAudioEl() {
+  if (!VocAudio.el) { try { const a = new Audio(); a.preload = "auto"; a.setAttribute("playsinline", ""); VocAudio.el = a; } catch { VocAudio.el = null; } }
+  return VocAudio.el;
+}
+// iPhone разрешает звук только после нажатия пользователя: «будим» один и тот же плеер при первом нажатии.
+function vocUnlockAudio() {
+  if (VocAudio.unlocked) return;
+  const a = vocAudioEl();
+  if (!a) return;
+  VocAudio.unlocked = true;
+  try { a.muted = true; a.src = VOC_SILENT_WAV; const p = a.play(); if (p && p.then) p.then(() => { a.pause(); a.muted = false; }).catch(() => { a.muted = false; }); else a.muted = false; } catch { a.muted = false; }
+}
+function vocGoogleUrl(text, lang) {
+  const tl = lang === "zh" ? "zh-CN" : lang || "en";
+  return `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(text)}`;
+}
+function vocSynth(text, lang = "en") {
   try {
     const synth = window.speechSynthesis;
     if (!synth) return;
     synth.cancel();
     const code = (VOC_LANGS[lang] || VOC_LANGS.en).tts;
-    const u = new SpeechSynthesisUtterance(String(text || "").split("/")[0]);
+    const u = new SpeechSynthesisUtterance(text);
     u.lang = code; u.rate = 0.9;
     const pre = code.split("-")[0];
     const v = (synth.getVoices() || []).find((x) => new RegExp(`^${pre}(-|_|$)`, "i").test(x.lang));
@@ -1391,7 +1418,58 @@ function vocSpeak(text, lang = "en") {
     synth.speak(u);
   } catch {}
 }
-const vocCanSpeak = () => { try { return !!window.speechSynthesis; } catch { return false; } };
+function vocSpeak(text, lang = "en") {
+  const clean = vocClean(text);
+  if (!clean) return;
+  try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+  const a = vocAudioEl();
+  if (!a) { vocSynth(clean, lang); return; }
+  VocAudio.unlocked = true;
+  const srcs = [VocAudio.urls[vocAudioKey(lang, clean)], vocGoogleUrl(clean, lang)].filter(Boolean);
+  const token = ++VocAudio.seq;
+  let i = 0;
+  const tryNext = () => {
+    if (token !== VocAudio.seq) return;
+    if (i >= srcs.length) { vocSynth(clean, lang); return; }
+    const src = srcs[i++];
+    let done = false;
+    const fail = () => { if (done || token !== VocAudio.seq) return; done = true; clearTimeout(timer); tryNext(); };
+    const timer = setTimeout(fail, 5000); // не загрузилось за 5 секунд — пробуем следующий способ
+    a.onerror = fail;
+    a.onplaying = () => { done = true; clearTimeout(timer); };
+    try {
+      a.muted = false;
+      a.src = src;
+      const p = a.play();
+      if (p && p.catch) p.catch((e) => { if (e && e.name === "AbortError") return; fail(); });
+    } catch { fail(); }
+  };
+  tryNext();
+}
+// Заранее просим у сервера аудиофайлы слов (по 12 за раз), чтобы при нажатии звук был сразу.
+async function vocPrefetchAudio(api, studentId, words) {
+  if (!api || !studentId || !words?.length) return;
+  const byLang = {};
+  words.forEach((w) => {
+    const clean = vocClean(w.en);
+    const key = vocAudioKey(w.lang, clean);
+    if (!clean || key in VocAudio.urls || VocAudio.pending[key]) return;
+    VocAudio.pending[key] = true;
+    (byLang[w.lang || "en"] = byLang[w.lang || "en"] || []).push(clean);
+  });
+  for (const [lang, list] of Object.entries(byLang)) {
+    for (let k = 0; k < list.length; k += 12) {
+      const chunk = list.slice(k, k + 12);
+      try {
+        const res = await api({ vocabStudy: { studentId, op: "audio", lang, texts: chunk } });
+        const got = res?.vocab?.audio || {};
+        chunk.forEach((t) => { const key = vocAudioKey(lang, t); if (got[t]) VocAudio.urls[key] = got[t]; delete VocAudio.pending[key]; });
+      } catch {
+        chunk.forEach((t) => { delete VocAudio.pending[vocAudioKey(lang, t)]; });
+      }
+    }
+  }
+}
 function vocShuffle(a) { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; }
 function vocStatus(p, now) {
   if (!p) return "new";
@@ -1399,7 +1477,7 @@ function vocStatus(p, now) {
   return (p.b || 0) >= VOC_LEARNED ? "learned" : "learning";
 }
 // Слова на раунд: сначала те, что пора повторить, потом новые, потом остальные (по дате повтора).
-function vocPickRound(words, prog, n = VOC_ROUND) {
+function vocPickRound(words, prog, n = Infinity) {
   const now = Date.now();
   const due = [], fresh = [], rest = [];
   words.forEach((w) => { const st = vocStatus(prog[w.id], now); (st === "due" ? due : st === "new" ? fresh : rest).push(w); });
@@ -1408,7 +1486,6 @@ function vocPickRound(words, prog, n = VOC_ROUND) {
 }
 
 function SpeakBtn({ text, lang, size = 34, light }) {
-  if (!vocCanSpeak()) return null;
   return (
     <button onClick={(e) => { e.stopPropagation(); haptic("light"); vocSpeak(text, lang); }} aria-label="speak" className="rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform"
       style={{ width: size, height: size, background: light ? "rgba(255,255,255,0.2)" : "var(--soft-blue-bg)", color: light ? "#fff" : BLUE }}>
@@ -1501,7 +1578,7 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t, ui
     return (
       <div className="anim-fade">
         {top}{repeatTag}
-        <button onClick={() => { haptic("light"); setFlipped((f) => !f); }} className="w-full rounded-[28px] px-5 text-center flex flex-col items-center justify-center active:scale-[0.99] transition-transform"
+        <div role="button" tabIndex={0} onClick={() => { haptic("light"); setFlipped((f) => !f); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setFlipped((f) => !f); } }} className="w-full rounded-[28px] px-5 text-center flex flex-col items-center justify-center active:scale-[0.99] transition-transform cursor-pointer select-none"
           style={{ minHeight: 280, background: flipped ? "var(--surface)" : `linear-gradient(150deg, ${BLUE}, #1E40AF)`, color: flipped ? "var(--ink)" : "#fff", boxShadow: "0 10px 30px rgba(26,26,23,0.12)" }}>
           <div className="text-[30px] font-extrabold leading-tight break-words">{w.en}</div>
           {w.tr && <div className="text-[16px] mt-1.5" style={{ opacity: 0.8 }}>{w.tr}</div>}
@@ -1513,7 +1590,7 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t, ui
           ) : (
             <div className="mt-6 text-[12.5px] font-semibold" style={{ opacity: 0.75 }}>👆 {t("voc_tap_flip")}</div>
           )}
-        </button>
+        </div>
         <div className="grid grid-cols-2 gap-2.5 mt-3">
           <button onClick={() => { answer(false); next(); }} className="py-4 rounded-[18px] text-[15px] font-bold" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>😕 {t("voc_dont_know")}</button>
           <button onClick={() => { answer(true); next(); }} className="py-4 rounded-[18px] text-[15px] font-bold" style={{ background: "var(--soft-green-bg)", color: "var(--soft-green-fg)" }}>😊 {t("voc_know")}</button>
@@ -1604,6 +1681,14 @@ function VocabScreen({ student, t, api, lang: ui = "ru" }) {
   const [session, setSession] = useState(null); // { mode, words, pool, key }
   const [listOpen, setListOpen] = useState(false);
   const [loadingUnit, setLoadingUnit] = useState(null);
+  // Ученик сам решает, что учить: все слова сразу, по 20/10 или только выбранные слова.
+  const [pick, setPick] = useState(() => new Set());
+  const [selecting, setSelecting] = useState(false);
+  const [wordQ, setWordQ] = useState(""); // поиск слова в списке
+  const listRef = useRef(null);
+  const openSelect = () => { haptic("light"); setSelecting(true); setListOpen(true); setTimeout(() => { try { listRef.current && listRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {} }, 60); };
+  const [roundSize, setRoundSizeState] = useState(() => { try { return localStorage.getItem("gu_voc_round") || "all"; } catch { return "all"; } });
+  const setRoundSize = (v) => { setRoundSizeState(v); try { localStorage.setItem("gu_voc_round", v); } catch {} };
   const pendingRef = useRef({}); // ещё не сохранённые изменения
   const timerRef = useRef(null);
 
@@ -1651,6 +1736,8 @@ function VocabScreen({ student, t, api, lang: ui = "ru" }) {
     setLoadingUnit(null);
     if (res?.error) { setErr(res.error); return; }
     setUnit(res.vocab); setProg((p) => ({ ...p, [res.vocab.testId]: { ...(res.vocab.progress || {}), ...(p[res.vocab.testId] || {}) } })); setListOpen(false);
+    setPick(new Set()); setSelecting(false); setWordQ("");
+    vocPrefetchAudio(api, student.id, (res.vocab.words || []).slice(0, 24));
     try { window.scrollTo({ top: 0 }); } catch {}
   };
   const startReview = async () => {
@@ -1661,12 +1748,25 @@ function VocabScreen({ student, t, api, lang: ui = "ru" }) {
     const v = res.vocab;
     if (!v.words?.length) { setErr(t("voc_nothing_due")); return; }
     setProg((p) => { const n = { ...p }; Object.entries(v.progress || {}).forEach(([tid, ws]) => { n[tid] = { ...ws, ...(p[tid] || {}) }; }); return n; });
-    setSession({ mode: "choice", words: vocShuffle(v.words).slice(0, 20), pool: v.words, key: Date.now(), review: true });
+    vocUnlockAudio();
+    setSession({ mode: "choice", words: vocShuffle(v.words), pool: v.words, key: Date.now(), review: true });
+    vocPrefetchAudio(api, student.id, v.words);
+  };
+  const roundWords = (sel) => {
+    const up = prog[unit.testId] || {};
+    if (sel && sel.length) { const set = new Set(sel); return unit.words.filter((w) => set.has(w.id)); }
+    const n = roundSize === "all" ? Infinity : Number(roundSize) || Infinity;
+    return vocPickRound(unit.words, up, n);
   };
   const startMode = (mode) => {
     haptic("light");
-    const up = prog[unit.testId] || {};
-    setSession({ mode, words: vocPickRound(unit.words, up), pool: unit.words, key: Date.now() });
+    vocUnlockAudio();
+    const sel = pick.size ? [...pick] : null;
+    const words = roundWords(sel);
+    if (!words.length) return;
+    setSession({ mode, words: sel ? vocShuffle(words) : words, pool: unit.words, key: Date.now(), sel });
+    setSelecting(false);
+    vocPrefetchAudio(api, student.id, words);
     try { window.scrollTo({ top: 0 }); } catch {}
   };
   const closeSession = async () => {
@@ -1683,7 +1783,7 @@ function VocabScreen({ student, t, api, lang: ui = "ru" }) {
     return (
       <VocabSession key={session.key} words={session.words} pool={session.pool} mode={session.mode} prog={flatProg} onGrade={grade} t={t} ui={ui}
         onExit={closeSession}
-        onAgain={() => setSession((s) => ({ ...s, key: Date.now(), words: s.review ? vocShuffle(s.pool).slice(0, 20) : vocPickRound(unit.words, prog[unit.testId] || {}) }))} />
+        onAgain={() => setSession((s) => ({ ...s, key: Date.now(), words: s.review ? vocShuffle(s.pool) : s.sel ? vocShuffle(roundWords(s.sel)) : roundWords(null) }))} />
     );
   }
 
@@ -1717,6 +1817,24 @@ function VocabScreen({ student, t, api, lang: ui = "ru" }) {
         </PlainCard>
 
         <SectionLabel className="mt-5">{t("voc_how_learn")}</SectionLabel>
+        {pick.size === 0 ? (
+          <div className="flex gap-1.5 mb-2.5">
+            {[["all", t("voc_all_n", { n: unit.words.length })], ["20", "20"], ["10", "10"]].filter(([k]) => k === "all" || Number(k) < unit.words.length).map(([k, label]) => {
+              const active = roundSize === k || (k === "all" && roundSize !== "all" && Number(roundSize) >= unit.words.length);
+              return (
+                <button key={k} onClick={() => { haptic("light"); setRoundSize(k); }} className="flex-1 py-2 rounded-full text-[12.5px] font-bold"
+                  style={{ background: active ? "var(--ink)" : "var(--surface)", color: active ? "var(--surface)" : "var(--ink)", boxShadow: "0 2px 8px rgba(26,26,23,0.06)" }}>{label}</button>
+              );
+            })}
+            <button onClick={openSelect} className="flex-1 py-2 rounded-full text-[12.5px] font-bold" style={{ background: "var(--soft-blue-bg)", color: BLUE, boxShadow: "0 2px 8px rgba(26,26,23,0.06)" }}>✋ {t("voc_choose_short")}</button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 mb-2.5 px-3.5 py-2.5 rounded-[16px]" style={{ background: "var(--soft-blue-bg)", color: BLUE }}>
+            <CheckCircle2 size={16} className="shrink-0" />
+            <div className="text-[13px] font-bold flex-1">{t("voc_will_sel", { n: pick.size })}</div>
+            <button onClick={() => { haptic("light"); setPick(new Set()); }} className="text-[12px] font-bold underline shrink-0">{t("voc_sel_clear")}</button>
+          </div>
+        )}
         <div className="space-y-2.5">
           {modes.map((m) => (
             <button key={m.mode} onClick={() => startMode(m.mode)} className="w-full rounded-[20px] px-4 py-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform" style={{ background: "var(--surface)", boxShadow: "0 4px 16px rgba(26,26,23,0.06)" }}>
@@ -1729,19 +1847,57 @@ function VocabScreen({ student, t, api, lang: ui = "ru" }) {
             </button>
           ))}
         </div>
-        <div className="text-[11.5px] px-1 mt-2" style={{ color: "var(--ink-3)" }}>{t("voc_round_hint", { n: Math.min(VOC_ROUND, unit.words.length) })}</div>
+        <div className="text-[11.5px] px-1 mt-2" style={{ color: "var(--ink-3)" }}>
+          {pick.size ? t("voc_hint_sel") : roundSize === "all" || Number(roundSize) >= unit.words.length ? t("voc_will_all", { n: unit.words.length }) : t("voc_will_n", { n: Number(roundSize) })}
+        </div>
 
-        <button onClick={() => { haptic("light"); setListOpen((v) => !v); }} className="w-full mt-5 flex items-center justify-between px-1">
-          <SectionLabel className="!mb-0">{t("voc_word_list", { n: unit.words.length })}</SectionLabel>
-          <span className="text-[12.5px] font-bold" style={{ color: RED }}>{listOpen ? t("voc_hide") : t("voc_show")}</span>
-        </button>
+        <div ref={listRef} className="w-full mt-5 flex items-center justify-between gap-2 px-1" style={{ scrollMarginTop: 12 }}>
+          <button onClick={() => { haptic("light"); if (listOpen) setSelecting(false); setListOpen((v) => !v); }} className="flex items-center gap-2 min-w-0 text-left">
+            <SectionLabel className="!mb-0">{t("voc_word_list", { n: unit.words.length })}</SectionLabel>
+          </button>
+          <div className="flex items-center gap-3 shrink-0">
+            <button onClick={() => { if (selecting) { haptic("light"); setSelecting(false); setWordQ(""); } else openSelect(); }} className="text-[12.5px] font-bold" style={{ color: BLUE }}>{selecting ? t("voc_select_done") : t("voc_select")}</button>
+            {!selecting && <button onClick={() => { haptic("light"); setListOpen((v) => !v); }} className="text-[12.5px] font-bold" style={{ color: RED }}>{listOpen ? t("voc_hide") : t("voc_show")}</button>}
+          </div>
+        </div>
+        {listOpen && selecting && (
+          <div className="mt-2.5">
+            <div className="text-[12px] px-1 mb-2" style={{ color: "var(--ink-sub)" }}>{t("voc_sel_hint")}</div>
+            <div className="flex gap-1.5 flex-wrap">
+              {[
+                ["all", t("voc_sel_all"), unit.words],
+                ["new", t("voc_sel_new"), unit.words.filter((w) => vocStatus(up[w.id], now) === "new")],
+                ["due", t("voc_sel_due"), unit.words.filter((w) => vocStatus(up[w.id], now) === "due")],
+                ["hard", t("voc_sel_hard"), unit.words.filter((w) => (up[w.id]?.w || 0) > 0)],
+                ["learning", t("voc_sel_learning"), unit.words.filter((w) => vocStatus(up[w.id], now) === "learning")],
+              ].filter(([k, , list]) => k === "all" || list.length > 0).map(([k, label, list]) => (
+                <button key={k} onClick={() => { haptic("light"); setPick(new Set(list.map((w) => w.id))); }} className="px-3 py-1.5 rounded-full text-[12px] font-bold" style={{ background: "var(--surface)", color: "var(--ink)", boxShadow: "0 2px 8px rgba(26,26,23,0.06)" }}>{label} · {list.length}</button>
+              ))}
+              {pick.size > 0 && <button onClick={() => { haptic("light"); setPick(new Set()); }} className="px-3 py-1.5 rounded-full text-[12px] font-bold" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>{t("voc_sel_clear")}</button>}
+            </div>
+            {unit.words.length > 12 && (
+              <div className="mt-2.5 flex items-center gap-2 px-3.5 py-2.5 rounded-[16px]" style={{ background: "var(--surface)", boxShadow: "0 2px 8px rgba(26,26,23,0.06)" }}>
+                <Search size={16} style={{ color: "var(--ink-3)" }} />
+                <input value={wordQ} onChange={(e) => setWordQ(e.target.value)} placeholder={t("voc_search_ph")} className="flex-1 bg-transparent outline-none text-[14px]" style={{ color: "var(--ink)" }} />
+                {wordQ && <button onClick={() => setWordQ("")} aria-label="clear"><X size={15} style={{ color: "var(--ink-3)" }} /></button>}
+              </div>
+            )}
+          </div>
+        )}
         {listOpen && (
           <PlainCard className="py-1.5 mt-2.5">
-            {unit.words.map((w, i) => {
+            {(() => { const ql = selecting ? wordQ.trim().toLowerCase() : ""; const shown = ql ? unit.words.filter((w) => String(w.en).toLowerCase().includes(ql) || String(w.ru).toLowerCase().includes(ql)) : unit.words; return shown.length ? null : <div className="text-[13px] py-4 text-center" style={{ color: "var(--ink-3)" }}>{t("voc_search_none")}</div>; })()}
+            {(selecting && wordQ.trim() ? unit.words.filter((w) => String(w.en).toLowerCase().includes(wordQ.trim().toLowerCase()) || String(w.ru).toLowerCase().includes(wordQ.trim().toLowerCase())) : unit.words).map((w, i) => {
               const st = vocStatus(up[w.id], now);
+              const on = pick.has(w.id);
+              const toggle = () => { haptic("light"); setPick((p) => { const n = new Set(p); if (n.has(w.id)) n.delete(w.id); else n.add(w.id); return n; }); };
               return (
-                <div key={w.id} className="flex items-center gap-3 py-2.5" style={{ borderTop: i ? `1px solid ${LINE}` : "none" }}>
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: dot[st] }} />
+                <div key={w.id} onClick={selecting ? toggle : undefined} className={`flex items-center gap-3 py-2.5 ${selecting ? "cursor-pointer" : ""}`} style={{ borderTop: i ? `1px solid ${LINE}` : "none" }}>
+                  {selecting ? (
+                    <span className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center" style={{ background: on ? BLUE : "transparent", border: on ? "none" : `2px solid ${LINE}`, color: "#fff" }}>{on && <Check size={14} />}</span>
+                  ) : (
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: dot[st] }} />
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="text-[14.5px] font-bold break-words">{w.en} <span className="text-[12px] font-medium" style={{ color: "var(--ink-sub)" }}>{w.tr}</span></div>
                     <div className="text-[13px] break-words" style={{ color: "var(--ink-2)" }}>{w.ru}</div>
@@ -1751,6 +1907,16 @@ function VocabScreen({ student, t, api, lang: ui = "ru" }) {
               );
             })}
           </PlainCard>
+        )}
+        {selecting && pick.size > 0 && (
+          <div className="sticky z-20 mt-3" style={{ bottom: 96 }}>
+            <div className="rounded-[20px] p-2.5 flex items-center gap-2" style={{ background: "var(--ink)", color: "var(--surface)", boxShadow: "0 10px 28px rgba(26,26,23,0.25)" }}>
+              <div className="text-[13px] font-bold flex-1 pl-1.5 leading-tight">{t("voc_learn_sel", { n: pick.size })}</div>
+              {modes.map((m) => (
+                <button key={m.mode} onClick={() => startMode(m.mode)} aria-label={m.title} title={m.title} className="w-11 h-11 rounded-[14px] flex items-center justify-center shrink-0 active:scale-95 transition-transform" style={{ background: m.bg, color: m.color }}><m.icon size={20} /></button>
+              ))}
+            </div>
+          </div>
         )}
         {err && <div className="text-[12.5px] mt-3 text-center" style={{ color: RED }}>{err}</div>}
       </div>
@@ -3539,7 +3705,7 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
 /* ----------------------------------- Переводы ----------------------------------- */
 const TRANSLATIONS = {
   ru: {
-    voc_title: "Слова", voc_home_title: "Учить слова", voc_home_sub: "Карточки, тренировки, повторение", voc_hero_title: "Мои слова", voc_hero_learned: "Выучено слов: {n}", voc_review_btn: "Повторить слова ({n})", voc_review_none: "Повторять пока нечего", voc_nothing_due: "Сейчас нечего повторять", voc_my_level: "мой уровень", voc_new_chip: "новый", voc_learned_of: "Выучено {n} из {m}", voc_unit_line: "Выучено {l} · учу {s} · всего {m}", voc_words_n: "Слов: {n}", voc_empty: "По твоему предмету слов пока нет — их загружает центр вместе с тестами.", voc_all_units: "Все юниты", voc_st_new: "Новые", voc_st_learning: "Учу", voc_st_due: "Повторить", voc_st_learned: "Выучено", voc_how_learn: "Как учить", voc_mode_cards: "Карточки", voc_mode_cards_sub: "Смотришь слово, переворачиваешь — видишь перевод", voc_mode_choice: "Выбери перевод", voc_mode_choice_sub: "4 варианта ответа", voc_mode_type: "Напиши слово", voc_mode_type_sub: "Пишешь {l} — так лучше всего запоминается", voc_round_hint: "В одном раунде {n} слов: сначала те, что пора повторить, потом новые.", voc_word_list: "Все слова юнита ({n})", voc_show: "Показать", voc_hide: "Скрыть", voc_done_title: "Раунд пройден!", voc_done_first: "С первого раза верно: {c} из {n}", voc_done_learned: "Выучено новых слов: {n}", voc_done_hint: "Слова с ошибками вернутся на повторение. Выученные слова приложение напомнит повторить через несколько дней, чтобы не забылись.", voc_back_unit: "К юниту", voc_again: "Ещё раунд", voc_repeat_word: "Ещё раз это слово", voc_tap_flip: "Нажми, чтобы увидеть перевод", voc_dont_know: "Не знаю", voc_know: "Знаю", voc_choose_ru: "Выбери перевод", voc_choose_en: "Выбери слово {l}", voc_right_is: "Правильно:", voc_type_prompt: "Напиши {l}", voc_first_letter: "Первая буква «{l}» · длина {n}", voc_type_ph: "Слово {l}", voc_show_answer: "Не знаю", voc_check: "Проверить", voc_next: "Дальше",
+    voc_title: "Слова", voc_home_title: "Учить слова", voc_home_sub: "Карточки, тренировки, повторение", voc_hero_title: "Мои слова", voc_hero_learned: "Выучено слов: {n}", voc_review_btn: "Повторить слова ({n})", voc_review_none: "Повторять пока нечего", voc_nothing_due: "Сейчас нечего повторять", voc_my_level: "мой уровень", voc_new_chip: "новый", voc_learned_of: "Выучено {n} из {m}", voc_unit_line: "Выучено {l} · учу {s} · всего {m}", voc_words_n: "Слов: {n}", voc_empty: "По твоему предмету слов пока нет — их загружает центр вместе с тестами.", voc_all_units: "Все юниты", voc_st_new: "Новые", voc_st_learning: "Учу", voc_st_due: "Повторить", voc_st_learned: "Выучено", voc_how_learn: "Как учить", voc_mode_cards: "Карточки", voc_mode_cards_sub: "Смотришь слово, переворачиваешь — видишь перевод", voc_mode_choice: "Выбери перевод", voc_mode_choice_sub: "4 варианта ответа", voc_mode_type: "Напиши слово", voc_mode_type_sub: "Пишешь {l} — так лучше всего запоминается", voc_round_hint: "В одном раунде {n} слов: сначала те, что пора повторить, потом новые.", voc_word_list: "Все слова юнита ({n})", voc_show: "Показать", voc_hide: "Скрыть", voc_done_title: "Раунд пройден!", voc_done_first: "С первого раза верно: {c} из {n}", voc_done_learned: "Выучено новых слов: {n}", voc_done_hint: "Слова с ошибками вернутся на повторение. Выученные слова приложение напомнит повторить через несколько дней, чтобы не забылись.", voc_back_unit: "К юниту", voc_again: "Ещё раунд", voc_repeat_word: "Ещё раз это слово", voc_tap_flip: "Нажми, чтобы увидеть перевод", voc_dont_know: "Не знаю", voc_know: "Знаю", voc_choose_ru: "Выбери перевод", voc_choose_en: "Выбери слово {l}", voc_right_is: "Правильно:", voc_type_prompt: "Напиши {l}", voc_first_letter: "Первая буква «{l}» · длина {n}", voc_type_ph: "Слово {l}", voc_show_answer: "Не знаю", voc_check: "Проверить", voc_next: "Дальше", voc_all_n: "Все ({n})", voc_will_all: "Будешь учить все {n} слов сразу: сначала те, что пора повторить, потом новые.", voc_will_n: "Будешь учить {n} слов: сначала те, что пора повторить, потом новые.", voc_will_sel: "Выбрано слов: {n}", voc_hint_sel: "Будешь учить только выбранные слова — любым из трёх способов.", voc_select: "Выбрать слова", voc_select_done: "Готово", voc_sel_hint: "Нажимай на слова, которые хочешь учить, или выбери сразу группу:", voc_sel_all: "Все", voc_sel_new: "Новые", voc_sel_due: "Повторить", voc_sel_hard: "С ошибками", voc_sel_learning: "Учу", voc_sel_clear: "Снять выбор", voc_learn_sel: "Учить выбранные: {n}", voc_choose_short: "Выбрать", voc_search_ph: "Найти слово…", voc_search_none: "Ничего не нашлось",
     test_words_n: "{n} слов",
     vocab_ph_ru: "Перевод на русском", vocab_ph_en: "English word",
     close: "Закрыть", tests_title: "Тесты", tests_sub_todo: "Есть тест", tests_sub_wait: "Ждём учителя", tests_sub_done: "Всё сдано", tests_sub_none: "Пока нет",
@@ -3660,7 +3826,7 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Победы на олимпиадах, высокие баллы на тестах и другие достижения.",
   },
   en: {
-    voc_title: "Words", voc_home_title: "Learn words", voc_home_sub: "Flashcards, practice, review", voc_hero_title: "My words", voc_hero_learned: "Words learned: {n}", voc_review_btn: "Review words ({n})", voc_review_none: "Nothing to review yet", voc_nothing_due: "Nothing to review right now", voc_my_level: "my level", voc_new_chip: "new", voc_learned_of: "Learned {n} of {m}", voc_unit_line: "Learned {l} · learning {s} · total {m}", voc_words_n: "Words: {n}", voc_empty: "No words for your subject yet — the centre uploads them together with the tests.", voc_all_units: "All units", voc_st_new: "New", voc_st_learning: "Learning", voc_st_due: "Review", voc_st_learned: "Learned", voc_how_learn: "How to learn", voc_mode_cards: "Flashcards", voc_mode_cards_sub: "See the word, flip the card — see the translation", voc_mode_choice: "Choose the translation", voc_mode_choice_sub: "4 options", voc_mode_type: "Type the word", voc_mode_type_sub: "Type it {l} — the best way to remember", voc_round_hint: "One round has {n} words: first the ones due for review, then new ones.", voc_word_list: "All unit words ({n})", voc_show: "Show", voc_hide: "Hide", voc_done_title: "Round complete!", voc_done_first: "Right the first time: {c} of {n}", voc_done_learned: "New words learned: {n}", voc_done_hint: "Words you got wrong will come back for review. Learned words will come back in a few days so you don't forget them.", voc_back_unit: "Back to unit", voc_again: "Another round", voc_repeat_word: "This word again", voc_tap_flip: "Tap to see the translation", voc_dont_know: "Don't know", voc_know: "Know it", voc_choose_ru: "Choose the translation", voc_choose_en: "Choose the word {l}", voc_right_is: "Correct:", voc_type_prompt: "Type it {l}", voc_first_letter: "Starts with “{l}” · length {n}", voc_type_ph: "Word {l}", voc_show_answer: "Don't know", voc_check: "Check", voc_next: "Next",
+    voc_title: "Words", voc_home_title: "Learn words", voc_home_sub: "Flashcards, practice, review", voc_hero_title: "My words", voc_hero_learned: "Words learned: {n}", voc_review_btn: "Review words ({n})", voc_review_none: "Nothing to review yet", voc_nothing_due: "Nothing to review right now", voc_my_level: "my level", voc_new_chip: "new", voc_learned_of: "Learned {n} of {m}", voc_unit_line: "Learned {l} · learning {s} · total {m}", voc_words_n: "Words: {n}", voc_empty: "No words for your subject yet — the centre uploads them together with the tests.", voc_all_units: "All units", voc_st_new: "New", voc_st_learning: "Learning", voc_st_due: "Review", voc_st_learned: "Learned", voc_how_learn: "How to learn", voc_mode_cards: "Flashcards", voc_mode_cards_sub: "See the word, flip the card — see the translation", voc_mode_choice: "Choose the translation", voc_mode_choice_sub: "4 options", voc_mode_type: "Type the word", voc_mode_type_sub: "Type it {l} — the best way to remember", voc_round_hint: "One round has {n} words: first the ones due for review, then new ones.", voc_word_list: "All unit words ({n})", voc_show: "Show", voc_hide: "Hide", voc_done_title: "Round complete!", voc_done_first: "Right the first time: {c} of {n}", voc_done_learned: "New words learned: {n}", voc_done_hint: "Words you got wrong will come back for review. Learned words will come back in a few days so you don't forget them.", voc_back_unit: "Back to unit", voc_again: "Another round", voc_repeat_word: "This word again", voc_tap_flip: "Tap to see the translation", voc_dont_know: "Don't know", voc_know: "Know it", voc_choose_ru: "Choose the translation", voc_choose_en: "Choose the word {l}", voc_right_is: "Correct:", voc_type_prompt: "Type it {l}", voc_first_letter: "Starts with “{l}” · length {n}", voc_type_ph: "Word {l}", voc_show_answer: "Don't know", voc_check: "Check", voc_next: "Next", voc_all_n: "All ({n})", voc_will_all: "You'll learn all {n} words at once: first those due for review, then new ones.", voc_will_n: "You'll learn {n} words: first those due for review, then new ones.", voc_will_sel: "Words selected: {n}", voc_hint_sel: "You'll learn only the selected words — in any of the three ways.", voc_select: "Choose words", voc_select_done: "Done", voc_sel_hint: "Tap the words you want to learn, or pick a group:", voc_sel_all: "All", voc_sel_new: "New", voc_sel_due: "Review", voc_sel_hard: "Mistakes", voc_sel_learning: "Learning", voc_sel_clear: "Clear", voc_learn_sel: "Learn selected: {n}", voc_choose_short: "Choose", voc_search_ph: "Find a word…", voc_search_none: "Nothing found",
     test_words_n: "{n} words",
     vocab_ph_ru: "Russian translation", vocab_ph_en: "English word",
     close: "Close", tests_title: "Tests", tests_sub_todo: "New test", tests_sub_wait: "Waiting for teacher", tests_sub_done: "All done", tests_sub_none: "None yet",
@@ -3781,7 +3947,7 @@ const TRANSLATIONS = {
     coins_info_achievements_text: "Wins at olympiads, high test scores, and other achievements.",
   },
   uz: {
-    voc_title: "So'zlar", voc_home_title: "So'z yodlash", voc_home_sub: "Kartochkalar, mashqlar, takrorlash", voc_hero_title: "Mening so'zlarim", voc_hero_learned: "Yodlangan so'zlar: {n}", voc_review_btn: "So'zlarni takrorlash ({n})", voc_review_none: "Hozircha takrorlash yo'q", voc_nothing_due: "Hozir takrorlash kerak emas", voc_my_level: "mening darajam", voc_new_chip: "yangi", voc_learned_of: "{m} dan {n} tasi yodlandi", voc_unit_line: "Yodlandi {l} · o'rganyapman {s} · jami {m}", voc_words_n: "So'zlar: {n}", voc_empty: "Faningiz bo'yicha hozircha so'zlar yo'q — markaz ularni testlar bilan birga yuklaydi.", voc_all_units: "Barcha unitlar", voc_st_new: "Yangi", voc_st_learning: "O'rganyapman", voc_st_due: "Takrorlash", voc_st_learned: "Yodlandi", voc_how_learn: "Qanday o'rganish", voc_mode_cards: "Kartochkalar", voc_mode_cards_sub: "So'zni ko'rasan, kartani aylantirasan — tarjima", voc_mode_choice: "Tarjimani tanla", voc_mode_choice_sub: "4 ta variant", voc_mode_type: "So'zni yoz", voc_mode_type_sub: "{l} yozasan — eng yaxshi yodlash usuli", voc_round_hint: "Bir raundda {n} ta so'z: avval takrorlash kerak bo'lganlari, keyin yangilari.", voc_word_list: "Unitning barcha so'zlari ({n})", voc_show: "Ko'rsatish", voc_hide: "Yashirish", voc_done_title: "Raund tugadi!", voc_done_first: "Birinchi urinishda to'g'ri: {n} dan {c}", voc_done_learned: "Yangi yodlangan so'zlar: {n}", voc_done_hint: "Xato qilingan so'zlar takrorlashga qaytadi. Yodlangan so'zlar unutilmasligi uchun bir necha kundan keyin qaytadi.", voc_back_unit: "Unitga", voc_again: "Yana raund", voc_repeat_word: "Bu so'z yana", voc_tap_flip: "Tarjimani ko'rish uchun bos", voc_dont_know: "Bilmayman", voc_know: "Bilaman", voc_choose_ru: "Tarjimani tanla", voc_choose_en: "So'zni tanla ({l})", voc_right_is: "To'g'ri:", voc_type_prompt: "Yoz ({l})", voc_first_letter: "Birinchi harf «{l}» · uzunligi {n}", voc_type_ph: "So'z ({l})", voc_show_answer: "Bilmayman", voc_check: "Tekshirish", voc_next: "Keyingi",
+    voc_title: "So'zlar", voc_home_title: "So'z yodlash", voc_home_sub: "Kartochkalar, mashqlar, takrorlash", voc_hero_title: "Mening so'zlarim", voc_hero_learned: "Yodlangan so'zlar: {n}", voc_review_btn: "So'zlarni takrorlash ({n})", voc_review_none: "Hozircha takrorlash yo'q", voc_nothing_due: "Hozir takrorlash kerak emas", voc_my_level: "mening darajam", voc_new_chip: "yangi", voc_learned_of: "{m} dan {n} tasi yodlandi", voc_unit_line: "Yodlandi {l} · o'rganyapman {s} · jami {m}", voc_words_n: "So'zlar: {n}", voc_empty: "Faningiz bo'yicha hozircha so'zlar yo'q — markaz ularni testlar bilan birga yuklaydi.", voc_all_units: "Barcha unitlar", voc_st_new: "Yangi", voc_st_learning: "O'rganyapman", voc_st_due: "Takrorlash", voc_st_learned: "Yodlandi", voc_how_learn: "Qanday o'rganish", voc_mode_cards: "Kartochkalar", voc_mode_cards_sub: "So'zni ko'rasan, kartani aylantirasan — tarjima", voc_mode_choice: "Tarjimani tanla", voc_mode_choice_sub: "4 ta variant", voc_mode_type: "So'zni yoz", voc_mode_type_sub: "{l} yozasan — eng yaxshi yodlash usuli", voc_round_hint: "Bir raundda {n} ta so'z: avval takrorlash kerak bo'lganlari, keyin yangilari.", voc_word_list: "Unitning barcha so'zlari ({n})", voc_show: "Ko'rsatish", voc_hide: "Yashirish", voc_done_title: "Raund tugadi!", voc_done_first: "Birinchi urinishda to'g'ri: {n} dan {c}", voc_done_learned: "Yangi yodlangan so'zlar: {n}", voc_done_hint: "Xato qilingan so'zlar takrorlashga qaytadi. Yodlangan so'zlar unutilmasligi uchun bir necha kundan keyin qaytadi.", voc_back_unit: "Unitga", voc_again: "Yana raund", voc_repeat_word: "Bu so'z yana", voc_tap_flip: "Tarjimani ko'rish uchun bos", voc_dont_know: "Bilmayman", voc_know: "Bilaman", voc_choose_ru: "Tarjimani tanla", voc_choose_en: "So'zni tanla ({l})", voc_right_is: "To'g'ri:", voc_type_prompt: "Yoz ({l})", voc_first_letter: "Birinchi harf «{l}» · uzunligi {n}", voc_type_ph: "So'z ({l})", voc_show_answer: "Bilmayman", voc_check: "Tekshirish", voc_next: "Keyingi", voc_all_n: "Hammasi ({n})", voc_will_all: "Barcha {n} ta so'zni birdaniga o'rganasan: avval takrorlash kerak bo'lganlari, keyin yangilari.", voc_will_n: "{n} ta so'zni o'rganasan: avval takrorlash kerak bo'lganlari, keyin yangilari.", voc_will_sel: "Tanlangan so'zlar: {n}", voc_hint_sel: "Faqat tanlangan so'zlarni o'rganasan — uchta usulning istalganida.", voc_select: "So'zlarni tanlash", voc_select_done: "Tayyor", voc_sel_hint: "O'rganmoqchi bo'lgan so'zlarni bos yoki guruhni tanla:", voc_sel_all: "Hammasi", voc_sel_new: "Yangilari", voc_sel_due: "Takrorlash", voc_sel_hard: "Xatolilar", voc_sel_learning: "O'rganyapman", voc_sel_clear: "Bekor qilish", voc_learn_sel: "Tanlanganlarni o'rganish: {n}", voc_choose_short: "Tanlash", voc_search_ph: "So'z qidirish…", voc_search_none: "Hech narsa topilmadi",
     test_words_n: "{n} ta so'z",
     vocab_ph_ru: "Ruscha tarjima", vocab_ph_en: "English word",
     close: "Yopish", tests_title: "Testlar", tests_sub_todo: "Yangi test", tests_sub_wait: "O'qituvchini kutamiz", tests_sub_done: "Hammasi topshirildi", tests_sub_none: "Hozircha yo'q",
