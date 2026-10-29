@@ -62,7 +62,7 @@ const {
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v27";
+const APP_VERSION = "v29";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
 
@@ -1367,27 +1367,40 @@ const VOC_LANGS = {
 };
 const vocLangName = (lang, ui) => (VOC_LANGS[lang] || {})[ui] || (VOC_LANGS[lang] || {}).ru || "";
 function vocNorm(s, lang) {
-  let x = String(s || "").toLowerCase().replace(/[‘’ʼ`´]/g, "'").replace(/[.,!?;:"«»()。，！？]/g, " ").replace(/\s+/g, " ").trim();
+  let x = String(s || "").toLowerCase().replace(/[‘’ʼ`´]/g, "'");
+  // немецкий: ß = ss, ä/ö/ü = ae/oe/ue (можно писать без немецкой клавиатуры)
+  if (lang === "de") x = x.replace(/ß/g, "ss").replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue");
+  x = x.replace(/[.,!?;:"«»„“”()…。，！？]/g, " ").replace(/[–—]/g, " ").replace(/\s+/g, " ").trim();
   if (!lang || lang === "en") x = x.replace(/^to /, "").replace(/^(a|an|the) /, "");
+  if (lang === "zh") x = x.replace(/\s+/g, "");
   return x;
 }
 function vocAccepts(w, given) {
   const g = vocNorm(given, w.lang);
   if (!g) return false;
-  const list = [...(w.enAlts || []), w.en].flatMap((x) => String(x || "").split("/"));
+  // английский: варианты через «/» — отдельные слова; другие языки: готовые варианты из файла (enAlts)
+  const list = !w.lang || w.lang === "en"
+    ? [...(w.enAlts || []), w.en].flatMap((x) => String(x || "").split("/"))
+    : [...(w.enAlts || []), w.en];
   return list.some((x) => vocNorm(x, w.lang) === g);
 }
+// Размер шрифта под длину фразы: длинные немецкие фразы не должны вылезать за карточку.
+const vocFont = (text, base) => { const n = String(text || "").length; return n > 90 ? Math.min(base, 16) : n > 55 ? Math.min(base, 19) : n > 30 ? Math.min(base, 23) : base; };
 // ---- Произношение ----
 // Голос телефона (speechSynthesis) есть не везде: на части Android его нет, на iPhone в беззвучном
 // режиме он молчит. Поэтому сначала играем настоящий аудиофайл слова (сервер делает его один раз и
 // хранит), если его ещё нет — голос Google, и только если и он не сработал — голос телефона.
 const VocAudio = { el: null, urls: {}, pending: {}, seq: 0, unlocked: false };
 const VOC_SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
-// Чистим слово так же, как сервер: первый вариант до «/», без скобок и «sb/sth».
-function vocClean(text) {
+// Чистим слово так же, как сервер. Английский: первый вариант до «/», без скобок и «sb/sth».
+// Другие языки (немецкий…): читаем всю фразу — варианты через «/» по очереди, текст в скобках тоже.
+function vocClean(text, lang = "en") {
+  if (lang && lang !== "en") {
+    return String(text || "").replace(/\s*\/\s*-?/g, ", ").replace(/[()]/g, "").replace(/…|\.\.\./g, " ").replace(/\s+/g, " ").replace(/\s+([,.!?])/g, "$1").trim().slice(0, 160);
+  }
   return String(text || "").split("/")[0].replace(/\([^)]*\)/g, " ").replace(/\b(sb|sth|smb|smth)\b\.?/gi, " ").replace(/\s+/g, " ").trim().slice(0, 120);
 }
-const vocAudioKey = (lang, text) => `${lang || "en"}|${vocClean(text).toLowerCase()}`;
+const vocAudioKey = (lang, text) => `${lang || "en"}|${vocClean(text, lang || "en").toLowerCase()}`;
 function vocAudioEl() {
   if (!VocAudio.el) { try { const a = new Audio(); a.preload = "auto"; a.setAttribute("playsinline", ""); VocAudio.el = a; } catch { VocAudio.el = null; } }
   return VocAudio.el;
@@ -1419,7 +1432,7 @@ function vocSynth(text, lang = "en") {
   } catch {}
 }
 function vocSpeak(text, lang = "en") {
-  const clean = vocClean(text);
+  const clean = vocClean(text, lang);
   if (!clean) return;
   try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
   const a = vocAudioEl();
@@ -1451,7 +1464,7 @@ async function vocPrefetchAudio(api, studentId, words) {
   if (!api || !studentId || !words?.length) return;
   const byLang = {};
   words.forEach((w) => {
-    const clean = vocClean(w.en);
+    const clean = vocClean(w.en, w.lang || "en");
     const key = vocAudioKey(w.lang, clean);
     if (!clean || key in VocAudio.urls || VocAudio.pending[key]) return;
     VocAudio.pending[key] = true;
@@ -1565,6 +1578,8 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t, ui
   }
 
   const w = cur.w;
+  // «Напиши слово»: длинную фразу или предложение печатать неудобно — такие показываем карточкой.
+  const m = mode === "type" && w.only === "ru" ? "cards" : mode;
   const top = (
     <div className="flex items-center gap-3 mb-3">
       <button onClick={() => { haptic("light"); onExit(); }} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface)", boxShadow: "0 2px 8px rgba(26,26,23,0.08)" }} aria-label="close"><X size={17} /></button>
@@ -1574,18 +1589,18 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t, ui
   );
   const repeatTag = cur.k >= 1000 ? <div className="text-center mb-2"><Chip tone="yellow">{t("voc_repeat_word")}</Chip></div> : null;
 
-  if (mode === "cards") {
+  if (m === "cards") {
     return (
       <div className="anim-fade">
         {top}{repeatTag}
         <div role="button" tabIndex={0} onClick={() => { haptic("light"); setFlipped((f) => !f); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setFlipped((f) => !f); } }} className="w-full rounded-[28px] px-5 text-center flex flex-col items-center justify-center active:scale-[0.99] transition-transform cursor-pointer select-none"
           style={{ minHeight: 280, background: flipped ? "var(--surface)" : `linear-gradient(150deg, ${BLUE}, #1E40AF)`, color: flipped ? "var(--ink)" : "#fff", boxShadow: "0 10px 30px rgba(26,26,23,0.12)" }}>
-          <div className="text-[30px] font-extrabold leading-tight break-words">{w.en}</div>
+          <div className="font-extrabold leading-tight break-words" style={{ fontSize: vocFont(w.en, 30) }}>{w.en}</div>
           {w.tr && <div className="text-[16px] mt-1.5" style={{ opacity: 0.8 }}>{w.tr}</div>}
           <div className="mt-3"><SpeakBtn lang={w.lang} text={w.en} size={42} light={!flipped} /></div>
           {flipped ? (
             <div className="mt-5 pt-4 w-full" style={{ borderTop: `1px dashed ${LINE}` }}>
-              <div className="text-[22px] font-bold leading-snug" style={{ color: GREEN_D }}>{w.ru}</div>
+              <div className="font-bold leading-snug" style={{ color: GREEN_D, fontSize: vocFont(w.ru, 22) }}>{w.ru}</div>
             </div>
           ) : (
             <div className="mt-6 text-[12.5px] font-semibold" style={{ opacity: 0.75 }}>👆 {t("voc_tap_flip")}</div>
@@ -1612,7 +1627,7 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t, ui
         {top}{repeatTag}
         <PlainCard className="py-6 text-center">
           <div className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--ink-3)" }}>{cur.dir === "en" ? t("voc_choose_ru") : t("voc_choose_en", { l: vocLangName(w.lang, ui) })}</div>
-          <div className="text-[26px] font-extrabold mt-2 leading-tight break-words">{cur.dir === "en" ? w.en : w.ru}</div>
+          <div className="font-extrabold mt-2 leading-tight break-words" style={{ fontSize: vocFont(cur.dir === "en" ? w.en : w.ru, 26) }}>{cur.dir === "en" ? w.en : w.ru}</div>
           {cur.dir === "en" && w.tr && <div className="text-[15px] mt-1" style={{ color: "var(--ink-sub)" }}>{w.tr}</div>}
           {cur.dir === "en" && <div className="mt-3 flex justify-center"><SpeakBtn lang={w.lang} text={w.en} /></div>}
         </PlainCard>
@@ -1635,7 +1650,7 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t, ui
     );
   }
 
-  // mode === "type": показываем перевод — ученик пишет английское слово.
+  // mode === "type": показываем перевод — ученик пишет слово на изучаемом языке.
   const check = () => {
     if (checked !== null) { next(); return; }
     if (!typed.trim()) return;
@@ -1648,7 +1663,7 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t, ui
       {top}{repeatTag}
       <PlainCard className="py-6 text-center">
         <div className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--ink-3)" }}>{t("voc_type_prompt", { l: vocLangName(w.lang, ui) })}</div>
-        <div className="text-[24px] font-extrabold mt-2 leading-tight break-words">{w.ru}</div>
+        <div className="font-extrabold mt-2 leading-tight break-words" style={{ fontSize: vocFont(w.ru, 24) }}>{w.ru}</div>
         <div className="text-[12px] mt-1.5" style={{ color: "var(--ink-3)" }}>{t("voc_first_letter", { l: String(w.en || "?").trim()[0] || "?", n: String(w.en || "").split("/")[0].trim().length })}</div>
       </PlainCard>
       <input ref={inputRef} value={typed} onChange={(e) => { if (checked === null) setTyped(e.target.value); }} onKeyDown={(e) => { if (e.key === "Enter") check(); }}
@@ -1659,7 +1674,7 @@ function VocabSession({ words, pool, mode, prog, onGrade, onExit, onAgain, t, ui
         <div className="mt-3 p-3.5 rounded-[18px] flex items-center gap-3" style={{ background: "var(--surface)" }}>
           <div className="flex-1 min-w-0">
             <div className="text-[11.5px]" style={{ color: "var(--ink-3)" }}>{t("voc_right_is")}</div>
-            <div className="text-[19px] font-extrabold" style={{ color: GREEN_D }}>{w.en} <span className="text-[13px] font-medium" style={{ color: "var(--ink-sub)" }}>{w.tr}</span></div>
+            <div className="font-extrabold break-words" style={{ color: GREEN_D, fontSize: vocFont(w.en, 19) }}>{w.en} <span className="text-[13px] font-medium" style={{ color: "var(--ink-sub)" }}>{w.tr}</span></div>
           </div>
           <SpeakBtn lang={w.lang} text={w.en} />
         </div>
@@ -2024,6 +2039,97 @@ function fmtMinutes(sec, t) {
 function sectionItems(section) {
   return Array.isArray(section.parts) ? section.parts.flatMap((p) => p.items || []) : section.items || [];
 }
+// Изучаемый язык теста — по названию предмета (как на сервере): подсказки «пиши по-немецки», клавиатура.
+function testLangOf(course) {
+  const s = String(course || "").toLowerCase();
+  if (/немец|german|deutsch|nemis/.test(s)) return "de";
+  if (/кита|chinese|xitoy|mandarin/.test(s)) return "zh";
+  if (/коре|korean|koreys/.test(s)) return "ko";
+  if (/француз|french|fransuz/.test(s)) return "fr";
+  if (/испан|spanish|ispan/.test(s)) return "es";
+  if (/турец|turkish|turk/.test(s)) return "tr";
+  if (/араб|arabic|arab/.test(s)) return "ar";
+  return "en";
+}
+// Сколько слов в тексте. В китайском пробелов нет — каждый иероглиф считаем за слово.
+function countWords(text) {
+  const s = String(text || "");
+  const cjk = (s.match(/[\u3400-\u9fff\uf900-\ufaff]/g) || []).length;
+  const rest = s.replace(/[\u3400-\u9fff\uf900-\ufaff]/g, " ").split(/\s+/).filter((w) => /[0-9A-Za-z\u00C0-\u024F\u0400-\u04FF]/.test(w)).length;
+  return cjk + rest;
+}
+// Пункт с несколькими пропусками («Vom hoh___ Turm … toll___ Blick»): ответы пропусков хранятся через « … ».
+const GAP_JOIN = " … ";
+const splitGaps = (v, n) => { const a = String(v || "").split("…").map((x) => x.trim()); while (a.length < n) a.push(""); return a.slice(0, n); };
+const joinGaps = (arr) => (arr.every((x) => !String(x || "").trim()) ? "" : arr.map((x) => String(x || "").replace(/…/g, "").trim()).join(GAP_JOIN));
+// Слова для «Составь предложение»: какие уже использованы в ответе (без учёта регистра, повторы считаем).
+const chipTokens = (s) => (String(s || "").toLowerCase().match(/[0-9a-z\u00C0-\u024F\u0400-\u04FF'’-]+|[?!.,;:]/g) || []);
+function usedChips(chips, value, cjk) {
+  const used = new Set();
+  const order = chips.map((c, i) => [String(c), i]).sort((a, b) => b[0].length - a[0].length);
+  if (cjk) {
+    let rest = String(value || "");
+    for (const [c, i] of order) {
+      const k = rest.indexOf(c);
+      if (c && k >= 0) { used.add(i); rest = rest.slice(0, k) + "\u0000".repeat(c.length) + rest.slice(k + c.length); }
+    }
+    return used;
+  }
+  const toks = chipTokens(value);
+  const taken = toks.map(() => false);
+  for (const [c, i] of order) {
+    const ct = chipTokens(c);
+    if (!ct.length) continue;
+    for (let k = 0; k + ct.length <= toks.length; k++) {
+      let ok = true;
+      for (let j = 0; j < ct.length; j++) if (taken[k + j] || toks[k + j] !== ct[j]) { ok = false; break; }
+      if (ok) { for (let j = 0; j < ct.length; j++) taken[k + j] = true; used.add(i); break; }
+    }
+  }
+  return used;
+}
+function appendChip(value, chip, cjk) {
+  const v = String(value || "");
+  if (cjk) return v + chip;
+  if (/^[?!.,;:]+$/.test(chip)) return v.replace(/\s+$/, "") + chip;
+  if (!v.trim()) return chip.charAt(0).toUpperCase() + chip.slice(1);
+  return v.replace(/\s+$/, "") + " " + chip;
+}
+function removeLastChip(value, chips, cjk) {
+  const v = String(value || "").replace(/\s+$/, "");
+  if (!v) return "";
+  const lower = v.toLowerCase();
+  const hit = chips.map(String).filter((c) => c && lower.endsWith(c.toLowerCase())).sort((a, b) => b.length - a.length)[0];
+  if (hit) return v.slice(0, v.length - hit.length).replace(/\s+$/, "");
+  if (cjk) return v.slice(0, -1);
+  return v.replace(/\s*\S+$/, "");
+}
+function WordChips({ chips, value, cjk, disabled, onChange, t }) {
+  const used = usedChips(chips, value, cjk);
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap gap-1.5">
+        {chips.map((c, i) => {
+          const on = used.has(i);
+          return (
+            <button key={i} disabled={disabled || on} onClick={() => { haptic("light"); onChange(appendChip(value, c, cjk)); }}
+              className="px-2.5 py-1.5 rounded-lg text-[14.5px] font-semibold active:scale-95 transition-transform"
+              style={{ background: on || disabled ? "var(--surface-alt)" : "var(--soft-blue-bg)", color: on || disabled ? "var(--ink-3)" : "var(--soft-blue-fg)", textDecoration: on && !disabled ? "line-through" : "none", border: "1px solid var(--line)" }}>
+              {c}
+            </button>
+          );
+        })}
+      </div>
+      {!disabled && (
+        <div className="flex items-center gap-3 mt-1.5 text-[12px] font-bold" style={{ color: "var(--ink-3)" }}>
+          <span className="flex-1 font-medium">{t("test_chips_hint")}</span>
+          {String(value || "").trim() && <button onClick={() => { haptic("light"); onChange(removeLastChip(value, chips, cjk)); }} style={{ color: BLUE }}>⌫ {t("test_chips_undo")}</button>}
+          {String(value || "").trim() && <button onClick={() => { haptic("light"); onChange(""); }} style={{ color: RED }}>{t("test_chips_clear")}</button>}
+        </div>
+      )}
+    </div>
+  );
+}
 function isAnswered(section, item, answers) {
   if (item.example) return true;
   const v = answers?.[section.id]?.[item.id];
@@ -2033,21 +2139,22 @@ function isAnswered(section, item, answers) {
 function countUnanswered(test, answers) {
   let n = 0;
   for (const s of test.sections || []) {
-    if (s.type === "writing") { if (String(answers?.[s.id]?.text || "").trim().split(/\s+/).filter(Boolean).length < 3) n++; continue; }
+    if (s.type === "writing") { if (countWords(answers?.[s.id]?.text) < 3) n++; continue; }
     for (const it of sectionItems(s)) if (!isAnswered(s, it, answers)) n++;
   }
   return n;
 }
 function sectionDone(section, answers) {
-  if (section.type === "writing") return String(answers?.[section.id]?.text || "").trim().split(/\s+/).filter(Boolean).length >= 3;
+  if (section.type === "writing") return countWords(answers?.[section.id]?.text) >= 3;
   return sectionItems(section).every((it) => isAnswered(section, it, answers));
 }
 const testHelp = (obj, lang) => (obj ? obj[lang] || obj.ru || "" : "");
 
 // ---------- Поля ввода ----------
-function GapInput({ value, onChange, onFocus, disabled, width = 120, focused }) {
+function GapInput({ value, onChange, onFocus, disabled, width = 120, focused, lang }) {
   return (
     <input
+      lang={lang}
       value={value || ""}
       onChange={(e) => onChange(e.target.value)}
       onFocus={onFocus}
@@ -2071,8 +2178,11 @@ function OptionPill({ text, selected, onClick, disabled }) {
 }
 
 // Одно упражнение. answersS — ответы этого упражнения { itemId: value }, setItem(itemId, value).
-function TestSection({ section, answersS, setItem, lang, t, focus, setFocus }) {
+function TestSection({ section, answersS, setItem, lang, t, focus, setFocus, tlang = "en" }) {
   const s = section;
+  const cjk = tlang === "zh";
+  // «по-немецки», «по-китайски» — в подсказках полей ввода
+  const ln = vocLangName(tlang, lang);
   const usedValues = new Set(Object.values(answersS || {}).map((v) => String(v || "").trim().toLowerCase()).filter(Boolean));
   (s.bankUsed || []).forEach((w) => usedValues.add(String(w).toLowerCase()));
   const items = sectionItems(s);
@@ -2090,6 +2200,7 @@ function TestSection({ section, answersS, setItem, lang, t, focus, setFocus }) {
     return Math.min(300, Math.max(base, Math.round(v.length * 8.6) + 26));
   };
   const gapProps = (it) => ({
+    lang: tlang,
     value: it.example ? it.answer : answersS?.[it.id],
     disabled: !!it.example,
     focused: focus && focus.sid === s.id && focus.iid === it.id,
@@ -2142,11 +2253,17 @@ function TestSection({ section, answersS, setItem, lang, t, focus, setFocus }) {
         <div className="space-y-2">
           {items.map((it) => {
             const parts = String(it.text || "").split("___");
+            const nGaps = parts.length - 1;
+            const multi = nGaps > 1;
+            const vals = multi ? splitGaps(it.example ? it.answer : answersS?.[it.id], nGaps) : null;
             return (
               <div key={it.id} className="rounded-[16px] px-3.5 py-3 text-[15px] leading-[2.1]" style={{ background: "var(--surface)" }}>
                 <span className="text-[12px] font-bold mr-1.5" style={{ color: "var(--ink-3)" }}>{it.n}</span>
                 {parts.map((p, i) => (
-                  <React.Fragment key={i}>{p}{i < parts.length - 1 && <GapInput {...gapProps(it)} width={autoW(it, 96)} />}</React.Fragment>
+                  <React.Fragment key={i}>{p}{i < parts.length - 1 && (multi ? (
+                    <GapInput {...gapProps(it)} value={vals[i]} width={Math.min(300, Math.max(70, Math.round(String(vals[i] || "").length * 8.6) + 26))}
+                      onChange={(v) => { const a = [...vals]; a[i] = v; setItem(it.id, joinGaps(a)); }} />
+                  ) : <GapInput {...gapProps(it)} width={autoW(it, 96)} />)}</React.Fragment>
                 ))}
               </div>
             );
@@ -2187,7 +2304,11 @@ function TestSection({ section, answersS, setItem, lang, t, focus, setFocus }) {
                   <span className="text-[12px] font-bold w-5 shrink-0" style={{ color: "var(--ink-3)" }}>{it.n}</span>
                   {textParts && (
                     <span className="text-[15px] mr-1">
-                      {textParts.map((p, i) => <React.Fragment key={i}>{p}{i < textParts.length - 1 && <b style={{ color: val !== undefined && val !== null ? BLUE : "var(--ink-3)" }}>{val !== undefined && val !== null && val >= 0 ? it.options[val] : "___"}</b>}</React.Fragment>)}
+                      {textParts.map((p, i) => {
+                        const picked = val !== undefined && val !== null && val >= 0 ? String(it.options[val] ?? "") : null;
+                        const pieces = picked && textParts.length > 2 && picked.includes("…") ? picked.split("…") : null;
+                        return <React.Fragment key={i}>{p}{i < textParts.length - 1 && <b style={{ color: picked !== null ? BLUE : "var(--ink-3)" }}>{picked !== null ? (pieces ? (pieces[i] ?? "").trim() : picked) : "___"}</b>}</React.Fragment>;
+                      })}
                     </span>
                   )}
                   <div className="flex flex-wrap gap-1.5">
@@ -2246,10 +2367,10 @@ function TestSection({ section, answersS, setItem, lang, t, focus, setFocus }) {
                 value={answersS?.[it.id] || ""}
                 onChange={(e) => setItem(it.id, e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const next = document.querySelector(`[data-vocab-idx="${idx + 1}"]`); if (next) next.focus(); else e.currentTarget.blur(); } }}
-                lang={s.dir === "ru" ? "ru" : "en"}
+                lang={s.dir === "ru" ? "ru" : tlang}
                 enterKeyHint="next"
                 autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false}
-                placeholder={s.dir === "ru" ? t("vocab_ph_ru") : t("vocab_ph_en")}
+                placeholder={s.dir === "ru" ? t("vocab_ph_ru") : tlang === "en" ? t("vocab_ph_en") : t("voc_type_ph", { l: ln })}
                 className="mt-2 w-full px-3 py-2.5 rounded-xl outline-none font-semibold"
                 style={{ background: "var(--soft-blue-bg)", color: "var(--ink)", border: "1.5px solid transparent", fontSize: 16 }}
               />
@@ -2263,12 +2384,17 @@ function TestSection({ section, answersS, setItem, lang, t, focus, setFocus }) {
           {items.map((it) => {
             const tr = s.mode === "tr";
             const val = it.example ? it.answer : answersS?.[it.id];
+            const chips = Array.isArray(it.chips) && it.chips.length > 1 ? it.chips : null;
             return (
               <div key={it.id} className="rounded-[16px] px-3.5 py-3" style={{ background: "var(--surface)" }}>
                 <div className="flex gap-2 text-[15px] leading-snug items-start">
                   <span className="text-[12px] font-bold w-5 shrink-0 pt-0.5" style={{ color: "var(--ink-3)" }}>{it.n}</span>
                   {it.image && <img src={it.image} alt="" className="w-24 h-20 object-contain rounded-lg shrink-0" style={{ background: "#fff" }} />}
-                  <span className="min-w-0" style={{ color: "var(--ink-2)" }}>{it.text}</span>
+                  {chips ? (
+                    <div className="min-w-0 flex-1 -mt-2"><WordChips chips={chips} value={val} cjk={cjk} disabled={!!it.example} onChange={(v) => setItem(it.id, v)} t={t} /></div>
+                  ) : (
+                    <span className="min-w-0" style={{ color: "var(--ink-2)" }}>{it.text}</span>
+                  )}
                 </div>
                 <textarea
                   value={val || ""}
@@ -2276,12 +2402,12 @@ function TestSection({ section, answersS, setItem, lang, t, focus, setFocus }) {
                   onChange={(e) => setItem(it.id, e.target.value.replace(/\n/g, " "))}
                   onFocus={() => setFocus({ sid: s.id, iid: it.id })}
                   rows={Math.max(tr ? 2 : 1, Math.ceil(String(val || "").length / 30))}
-                  lang={tr ? "ru" : "en"}
+                  lang={tr ? "ru" : tlang}
                   autoCapitalize="sentences"
                   autoCorrect="off"
                   autoComplete="off"
                   spellCheck={false}
-                  placeholder={tr ? t("test_tr_placeholder") : it.open ? t("test_open_placeholder") : t("test_en_placeholder")}
+                  placeholder={tr ? t("test_tr_placeholder") : it.open ? t("test_open_ph", { l: ln }) : t("test_tgt_ph", { l: ln })}
                   className="w-full mt-2 rounded-xl px-3 py-2.5 outline-none leading-snug resize-none font-semibold"
                   style={{ background: it.example ? "var(--surface-alt)" : "var(--soft-blue-bg)", color: it.example ? "var(--ink-2)" : "var(--ink)", border: `1.5px solid ${focus && focus.sid === s.id && focus.iid === it.id ? BLUE : "transparent"}`, fontSize: 16, minHeight: tr ? 64 : 46 }}
                 />
@@ -2297,13 +2423,14 @@ function TestSection({ section, answersS, setItem, lang, t, focus, setFocus }) {
             value={answersS?.text || ""}
             onChange={(e) => setItem("text", e.target.value)}
             rows={9}
+            lang={tlang}
             autoCapitalize="sentences"
             spellCheck={false}
-            placeholder={t("test_writing_placeholder")}
+            placeholder={t("test_writing_ph", { l: ln })}
             className="w-full rounded-xl p-3 outline-none leading-relaxed"
             style={{ background: "var(--surface-soft)", border: "1px solid var(--line)", color: "var(--ink)", fontSize: 16 }}
           />
-          <div className="text-[11.5px] mt-1.5 text-right" style={{ color: "var(--ink-3)" }}>{t("test_words", { n: String(answersS?.text || "").trim().split(/\s+/).filter(Boolean).length })}</div>
+          <div className="text-[11.5px] mt-1.5 text-right" style={{ color: "var(--ink-3)" }}>{t("test_words", { n: countWords(answersS?.text) })}</div>
         </div>
       )}
     </div>
@@ -2395,7 +2522,7 @@ function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
               </div>
             )}
           </div>
-          <TestSection key={s.id} section={s} answersS={answers[s.id] || {}} setItem={setItem} lang={lang} t={t} focus={focus} setFocus={setFocus} />
+          <TestSection key={s.id} section={s} answersS={answers[s.id] || {}} setItem={setItem} lang={lang} t={t} focus={focus} setFocus={setFocus} tlang={testLangOf(test.course)} />
         </div>
       </div>
 
@@ -3714,7 +3841,7 @@ const TRANSLATIONS = {
     test_btn_start: "Начать тест", test_btn_continue: "Продолжить", test_btn_retake: "Повторить материал и пересдать", test_btn_result: "Посмотреть результат",
     test_pass_short: "проходной {p}%", test_best: "{s} из {m}", test_attempts_used: "попытка {n} из {m}", test_minutes: "{n} мин",
     test_attempt_n: "Попытка {n} из {m}", test_exercise_n: "Упражнение {n} из {m}", test_exercise_short: "Упражнение {n}", test_points_n: "{n} баллов",
-    test_bank: "Слова для ответа — нажми, чтобы вставить", test_pick_letter: "Выбери букву ответа", test_writing_placeholder: "Пиши по-английски…", test_words: "Слов: {n}", test_tr_placeholder: "Перевод на русском или узбекском…", test_en_placeholder: "Напиши по-английски…", test_open_placeholder: "Ответь о себе по-английски…", test_sample: "Образец", test_part_points: "Засчитано частично: {n} из {m}",
+    test_bank: "Слова для ответа — нажми, чтобы вставить", test_pick_letter: "Выбери букву ответа", test_writing_placeholder: "Пиши по-английски…", test_words: "Слов: {n}", test_tr_placeholder: "Перевод на русском или узбекском…", test_en_placeholder: "Напиши по-английски…", test_open_placeholder: "Ответь о себе по-английски…", test_tgt_ph: "Напиши {l}…", test_open_ph: "Ответь о себе {l}…", test_writing_ph: "Пиши {l}…", test_chips_hint: "Нажимай на слова по порядку или пиши сам", test_chips_undo: "слово", test_chips_clear: "Очистить", test_sample: "Образец", test_part_points: "Засчитано частично: {n} из {m}",
     test_submit: "Сдать тест", test_checking: "Проверяем…", test_checking_long: "Проверяем ответы… Это может занять до минуты.",
     test_confirm_title: "Сдать тест?", test_confirm_unanswered: "Без ответа: {n}. Эти вопросы будут засчитаны как неверные.", test_confirm_all: "На все вопросы есть ответ.", test_time_spent: "Время: {time}", test_back_to_test: "Вернуться",
     test_result_title: "Результат теста", test_of_max: "из {m}", test_passed_big: "Тест сдан!", test_failed_big: "Тест не сдан", test_checking_big: "Почти готово",
@@ -3835,7 +3962,7 @@ const TRANSLATIONS = {
     test_btn_start: "Start test", test_btn_continue: "Continue", test_btn_retake: "Review and retake", test_btn_result: "See result",
     test_pass_short: "pass {p}%", test_best: "{s} of {m}", test_attempts_used: "attempt {n} of {m}", test_minutes: "{n} min",
     test_attempt_n: "Attempt {n} of {m}", test_exercise_n: "Exercise {n} of {m}", test_exercise_short: "Exercise {n}", test_points_n: "{n} points",
-    test_bank: "Words for answers — tap to insert", test_pick_letter: "Choose the answer letter", test_writing_placeholder: "Write in English…", test_words: "Words: {n}", test_tr_placeholder: "Translation in Russian or Uzbek…", test_en_placeholder: "Write in English…", test_open_placeholder: "Answer about yourself in English…", test_sample: "Sample", test_part_points: "Partly correct: {n} of {m}",
+    test_bank: "Words for answers — tap to insert", test_pick_letter: "Choose the answer letter", test_writing_placeholder: "Write in English…", test_words: "Words: {n}", test_tr_placeholder: "Translation in Russian or Uzbek…", test_en_placeholder: "Write in English…", test_open_placeholder: "Answer about yourself in English…", test_tgt_ph: "Write {l}…", test_open_ph: "Answer about yourself {l}…", test_writing_ph: "Write {l}…", test_chips_hint: "Tap the words in order or type yourself", test_chips_undo: "word", test_chips_clear: "Clear", test_sample: "Sample", test_part_points: "Partly correct: {n} of {m}",
     test_submit: "Submit test", test_checking: "Checking…", test_checking_long: "Checking your answers… This can take up to a minute.",
     test_confirm_title: "Submit the test?", test_confirm_unanswered: "Unanswered: {n}. They will count as wrong.", test_confirm_all: "All questions are answered.", test_time_spent: "Time: {time}", test_back_to_test: "Go back",
     test_result_title: "Test result", test_of_max: "of {m}", test_passed_big: "Test passed!", test_failed_big: "Test not passed", test_checking_big: "Almost done",
@@ -3956,7 +4083,7 @@ const TRANSLATIONS = {
     test_btn_start: "Testni boshlash", test_btn_continue: "Davom etish", test_btn_retake: "Takrorlab, qayta topshirish", test_btn_result: "Natijani ko'rish",
     test_pass_short: "o'tish bali {p}%", test_best: "{m} dan {s}", test_attempts_used: "{m} dan {n}-urinish", test_minutes: "{n} daq",
     test_attempt_n: "{m} dan {n}-urinish", test_exercise_n: "{m} dan {n}-mashq", test_exercise_short: "{n}-mashq", test_points_n: "{n} ball",
-    test_bank: "Javob uchun so'zlar — qo'yish uchun bosing", test_pick_letter: "Javob harfini tanlang", test_writing_placeholder: "Inglizcha yozing…", test_words: "So'zlar: {n}", test_tr_placeholder: "Rus yoki o'zbek tilidagi tarjima…", test_en_placeholder: "Inglizcha yozing…", test_open_placeholder: "O'zingiz haqingizda inglizcha javob bering…", test_sample: "Namuna", test_part_points: "Qisman qabul qilindi: {m} dan {n}",
+    test_bank: "Javob uchun so'zlar — qo'yish uchun bosing", test_pick_letter: "Javob harfini tanlang", test_writing_placeholder: "Inglizcha yozing…", test_words: "So'zlar: {n}", test_tr_placeholder: "Rus yoki o'zbek tilidagi tarjima…", test_en_placeholder: "Inglizcha yozing…", test_open_placeholder: "O'zingiz haqingizda inglizcha javob bering…", test_tgt_ph: "Javobni {l} yozing…", test_open_ph: "O'zingiz haqingizda {l} javob bering…", test_writing_ph: "Matnni {l} yozing…", test_chips_hint: "So'zlarni tartib bilan bosing yoki o'zingiz yozing", test_chips_undo: "so'z", test_chips_clear: "Tozalash", test_sample: "Namuna", test_part_points: "Qisman qabul qilindi: {m} dan {n}",
     test_submit: "Testni topshirish", test_checking: "Tekshirilmoqda…", test_checking_long: "Javoblar tekshirilmoqda… Bu bir daqiqagacha vaqt olishi mumkin.",
     test_confirm_title: "Testni topshirasizmi?", test_confirm_unanswered: "Javobsiz: {n}. Ular noto'g'ri deb hisoblanadi.", test_confirm_all: "Barcha savollarga javob berilgan.", test_time_spent: "Vaqt: {time}", test_back_to_test: "Qaytish",
     test_result_title: "Test natijasi", test_of_max: "{m} dan", test_passed_big: "Test topshirildi!", test_failed_big: "Test topshirilmadi", test_checking_big: "Deyarli tayyor",
