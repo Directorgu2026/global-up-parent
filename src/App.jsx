@@ -62,7 +62,7 @@ const {
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v30";
+const APP_VERSION = "v32";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
 
@@ -80,7 +80,10 @@ function storageSet(key, value) {
   } catch {}
   try { localStorage.setItem(key, value); } catch {}
 }
-function storageGet(key) {
+// cloudIsTruth — для сохранённого номера и пароля: если Telegram ответил, верим только ему. Пустой ответ
+// значит «вышли из аккаунта» (на этом или другом телефоне с тем же Telegram), и старую копию на этом
+// телефоне стираем. Раньше она подхватывалась, и на другом телефоне снова открывался прежний (чужой) аккаунт.
+function storageGet(key, cloudIsTruth) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (val) => { if (done) return; done = true; resolve(val || ""); };
@@ -89,7 +92,14 @@ function storageGet(key) {
     const tg = window.Telegram && window.Telegram.WebApp;
     if (tg && tg.CloudStorage) {
       try {
-        tg.CloudStorage.getItem(key, (err, val) => { finish(!err && val ? val : localVal); });
+        tg.CloudStorage.getItem(key, (err, val) => {
+          if (cloudIsTruth && !err) {
+            if (!val && localVal) { try { localStorage.removeItem(key); } catch {} }
+            finish(val || "");
+            return;
+          }
+          finish(!err && val ? val : localVal);
+        });
         setTimeout(() => finish(localVal), 1500); // на случай, если Telegram не ответит
         return;
       } catch {}
@@ -204,7 +214,7 @@ function haptic(style = "light") {
   } catch {}
 }
 
-async function fetchMyData(initData, phone, password, redeemItemId, redeemStudentId) {
+async function fetchMyData(initData, phone, password, redeemItemId, redeemStudentId, extra) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   let curLang = "ru";
@@ -213,7 +223,7 @@ async function fetchMyData(initData, phone, password, redeemItemId, redeemStuden
     const res = await fetch(EDGE_FUNCTION_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
-      body: JSON.stringify({ initData, phone, password, redeemItemId, redeemStudentId }),
+      body: JSON.stringify({ initData, phone, password, redeemItemId, redeemStudentId, ...(extra || {}) }),
       signal: controller.signal,
     });
     return await res.json();
@@ -3785,7 +3795,10 @@ function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme
 }
 
 /* -------------------------------- Экран входа -------------------------------- */
+// Причина неудачного входа от сервера (mini-app-data v23) → текст на языке приложения.
+const LOGIN_REASON_KEYS = { not_found: "login_err_not_found", no_password: "login_err_no_password", bad_password: "login_err_bad_password", too_many: "login_err_too_many" };
 function LoginScreen({ phone, setPhone, password, setPassword, loginError, loginLoading, onLogin, lang, changeLang, theme, changeTheme, t }) {
+  const [showPass, setShowPass] = useState(false);
   return (
     <div className={`theme-${theme} min-h-screen flex items-center justify-center p-4`} style={{ paddingTop: "calc(16px + var(--gu-safe-top, 0px))", background: PAPER }}>
       <style>{FONT_IMPORT}</style>
@@ -3821,12 +3834,18 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
           <div className="space-y-3">
             <div>
               <label className="text-[12px] font-medium opacity-50 block mb-1.5">{t("login_phone")}</label>
+              <p className="text-[11px] opacity-50 mb-1.5" style={{ marginTop: -4 }}>{t("login_phone_hint")}</p>
               <div className="flex items-center gap-1.5">
                 <span className="shrink-0 px-3.5 py-3 rounded-2xl text-[14px] font-semibold" style={{ background: "var(--surface-alt)" }}>+998</span>
                 <input
                   inputMode="numeric"
                   value={formatUzPhone((phone || "").replace(/[^0-9]/g, "").replace(/^998/, "").slice(0, 9))}
-                  onChange={(e) => setPhone("+998 " + formatUzPhone(e.target.value.replace(/[^0-9]/g, "").slice(0, 9)))}
+                  onChange={(e) => {
+                    // Вставили номер целиком («+998 90 123 45 67» из сообщения центра или «8 90 …») — берём последние 9 цифр.
+                    const d = e.target.value.replace(/[^0-9]/g, "");
+                    setPhone("+998 " + formatUzPhone(d.length > 9 ? d.slice(-9) : d));
+                  }}
+                  autoComplete="tel-national"
                   placeholder="90 123 45 67"
                   className="w-full text-[15px] px-4 py-3 rounded-2xl outline-none"
                   style={{ border: `1.5px solid ${LINE}`, background: PAPER, color: INK }}
@@ -3835,7 +3854,16 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
             </div>
             <div>
               <label className="text-[12px] font-medium opacity-50 block mb-1.5">{t("login_password")}</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full text-[15px] px-4 py-3 rounded-2xl outline-none" style={{ border: `1.5px solid ${LINE}`, background: PAPER, color: INK }} />
+              <div style={{ position: "relative" }}>
+                <input type={showPass ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onLogin(); }}
+                  autoCapitalize="none" autoCorrect="off" autoComplete="current-password" spellCheck={false}
+                  className="w-full text-[15px] px-4 py-3 rounded-2xl outline-none" style={{ border: `1.5px solid ${LINE}`, background: PAPER, color: INK, paddingRight: 52, fontFamily: showPass ? "ui-monospace, Menlo, monospace" : undefined }} />
+                <button type="button" onClick={() => setShowPass((v) => !v)} aria-label={showPass ? t("login_hide_password") : t("login_show_password")}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)" }}>
+                  {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+              <p className="text-[11px] opacity-50 mt-1.5">{t("login_password_hint")}</p>
             </div>
             {loginError && <p className="text-[12px] break-words font-medium" style={{ color: RED_D }}>{loginError}</p>}
             <button onClick={onLogin} disabled={loginLoading} className="w-full text-[15px] font-bold py-3.5 rounded-2xl text-white" style={{ background: RED, opacity: loginLoading ? 0.6 : 1 }}>
@@ -3919,6 +3947,12 @@ const TRANSLATIONS = {
     logout: "Выйти из аккаунта", payment_history: "История оплат",
     login_title: "Вход в систему", login_phone: "Номер телефона", login_password: "Пароль",
     login_button: "Войти", login_error_generic: "Не удалось войти", login_remember: "После первого входа вход запомнится на этом устройстве.",
+    login_phone_hint: "Номер из сообщения центра с паролем (ваш или родителя)", login_password_hint: "Большие и маленькие буквы различаются. Нажмите 👁, чтобы проверить пароль.",
+    login_show_password: "Показать пароль", login_hide_password: "Скрыть пароль", login_retry: "Попробовать снова",
+    login_err_not_found: "Этот номер не найден. Проверьте номер или спросите у администратора, какой номер записан в вашей карточке.",
+    login_err_no_password: "Для этого номера ещё не создан пароль. Попросите администратора создать пароль.",
+    login_err_bad_password: "Неверный пароль. Введите его точно как в сообщении от центра: большие и маленькие буквы различаются.",
+    login_err_too_many: "Слишком много неверных попыток. Подождите 15 минут и попробуйте снова.",
     loading: "Загрузка…", settings: "Настройки", language: "Язык", theme: "Тема",
     theme_light: "Светлая", theme_dark: "Тёмная",
     month_breakdown: "Разбивка по месяцам", discount_label: "Скидка −{pct}%",
@@ -4040,6 +4074,12 @@ const TRANSLATIONS = {
     logout: "Log out", payment_history: "Payment history",
     login_title: "Sign in", login_phone: "Phone number", login_password: "Password",
     login_button: "Sign in", login_error_generic: "Sign-in failed", login_remember: "After your first sign-in this device will remember you.",
+    login_phone_hint: "The number from the centre's message with your password (yours or your parent's)", login_password_hint: "Capital and small letters are different. Tap 👁 to check the password.",
+    login_show_password: "Show password", login_hide_password: "Hide password", login_retry: "Try again",
+    login_err_not_found: "This number was not found. Check it or ask the administrator which number is in your profile.",
+    login_err_no_password: "No password has been created for this number yet. Ask the administrator to create one.",
+    login_err_bad_password: "Wrong password. Type it exactly as in the centre's message: capital and small letters are different.",
+    login_err_too_many: "Too many wrong attempts. Wait 15 minutes and try again.",
     loading: "Loading…", settings: "Settings", language: "Language", theme: "Theme",
     theme_light: "Light", theme_dark: "Dark",
     month_breakdown: "Breakdown by month", discount_label: "Discount −{pct}%",
@@ -4161,6 +4201,12 @@ const TRANSLATIONS = {
     logout: "Chiqish", payment_history: "To'lovlar tarixi",
     login_title: "Tizimga kirish", login_phone: "Telefon raqami", login_password: "Parol",
     login_button: "Kirish", login_error_generic: "Kirib bo'lmadi", login_remember: "Birinchi marta kirgandan so'ng bu qurilma sizni eslab qoladi.",
+    login_phone_hint: "Markaz parol bilan yuborgan xabardagi raqam (sizniki yoki ota-onangizniki)", login_password_hint: "Katta va kichik harflar farq qiladi. Parolni tekshirish uchun 👁 ni bosing.",
+    login_show_password: "Parolni ko'rsatish", login_hide_password: "Parolni yashirish", login_retry: "Qayta urinish",
+    login_err_not_found: "Bu raqam topilmadi. Raqamni tekshiring yoki administratordan kartangizda qaysi raqam yozilganini so'rang.",
+    login_err_no_password: "Bu raqam uchun hali parol yaratilmagan. Administratordan parol yaratishni so'rang.",
+    login_err_bad_password: "Parol noto'g'ri. Uni markaz xabaridagidek aynan kiriting: katta va kichik harflar farq qiladi.",
+    login_err_too_many: "Juda ko'p noto'g'ri urinish. 15 daqiqa kuting va qayta urinib ko'ring.",
     loading: "Yuklanmoqda…", settings: "Sozlamalar", language: "Til", theme: "Mavzu",
     theme_light: "Yorug'", theme_dark: "Tungi",
     month_breakdown: "Oylar bo'yicha taqsimot", discount_label: "Chegirma −{pct}%",
@@ -4286,16 +4332,20 @@ export default function ParentApp() {
     setStudents(nextStudents || []);
   };
 
-  const loadWithCreds = async (data0, phoneVal, passwordVal) => {
+  const loginErrorText = (data) => (data.loginReason && LOGIN_REASON_KEYS[data.loginReason] ? t(LOGIN_REASON_KEYS[data.loginReason]) : data.loginError);
+  const loadWithCreds = async (data0, phoneVal, passwordVal, extra) => {
     try {
-      const data = phoneVal ? await fetchMyData(data0, phoneVal, passwordVal) : await fetchMyData(data0);
+      const data = phoneVal ? await fetchMyData(data0, phoneVal, passwordVal, undefined, undefined, extra) : await fetchMyData(data0);
       if (data.error) {
         const full = data.debug ? `${data.error} — ${JSON.stringify(data.debug)}` : data.error;
         if (phoneVal) { setLoginError(full); setPhase("not_linked"); return; }
         setErrorMsg(full); setPhase("error"); return;
       }
       if (!data.linked) {
-        if (phoneVal) setLoginError(data.loginError || `Диагностика: ${JSON.stringify(data)}`);
+        if (phoneVal) setLoginError(loginErrorText(data) || t("login_error_generic"));
+        // Сохранённый номер или пароль больше не подходит (пароль сменили, номер убрали) — забываем его,
+        // чтобы приложение не пробовало его при каждом открытии.
+        if (phoneVal && !extra?.login && data.loginReason && data.loginReason !== "too_many") { storageRemove("gu_phone"); storageRemove("gu_password"); }
         setPhase("not_linked");
         return;
       }
@@ -4428,13 +4478,15 @@ export default function ParentApp() {
         return;
       }
       // Не привязан — пробуем логин/пароль, сохранённые с прошлого раза на этом устройстве.
-      const savedPhone = await storageGet("gu_phone");
-      const savedPassword = await storageGet("gu_password");
+      const savedPhone = await storageGet("gu_phone", true);
+      const savedPassword = await storageGet("gu_password", true);
       if (savedPhone && savedPassword) {
         setPhone(savedPhone); setPassword(savedPassword);
         await loadWithCreds(data0, savedPhone, savedPassword);
         return;
       }
+      // Сервер не ответил — показываем причину на экране входа (иначе казалось бы, что «не пускает»).
+      if (first.error) setLoginError(String(first.error));
       setPhase("not_linked");
     })();
   }, []);
@@ -4461,13 +4513,16 @@ export default function ParentApp() {
     setLoginError("");
     setLoginLoading(true);
     try {
-      await loadWithCreds(initData, phone.trim(), password.trim());
+      // login: true — проверить номер и пароль, даже если этот Telegram уже открывает другого ученика.
+      await loadWithCreds(initData, phone.trim(), password.trim(), { login: true });
     } finally {
       setLoginLoading(false);
     }
   };
 
   const handleLogout = () => {
+    // Сервер отвязывает этот Telegram от учеников — иначе при следующем открытии снова вошёл бы прежний ученик.
+    fetchMyData(initData, null, null, undefined, undefined, { logout: true }).catch(() => {});
     setStudents([]);
     lastCoinsRef.current = {};
     lastGradeCountRef.current = {};
@@ -4691,6 +4746,7 @@ export default function ParentApp() {
           <XCircle size={30} className="mx-auto mb-2" style={{ color: BRICK }} />
           <p className="text-[14px] font-bold mb-1.5">{t("login_error_generic")}</p>
           <p className="text-[12.5px] opacity-55 break-words">{errorMsg}</p>
+          <button onClick={() => { try { window.location.reload(); } catch {} }} className="mt-4 px-5 py-2.5 rounded-2xl text-[14px] font-bold text-white" style={{ background: RED }}>{t("login_retry")}</button>
         </div>
       </div>
     );
