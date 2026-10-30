@@ -62,8 +62,19 @@ const {
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v32";
+const APP_VERSION = "v33";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
+// Ссылка из задания — открываем только http(s). «javascript:…» и подобное не превращаем в ссылку:
+// иначе по нажатию выполнился бы чужой код. Не похоже на адрес сайта — показываем просто текстом.
+function safeHref(url) {
+  const s = String(url || "").trim();
+  if (!s) return undefined;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/^(javascript|data|vbscript|file|blob):/i.test(s.replace(/[\u0000-\u0020]+/g, ""))) return undefined;
+  if (/^[^\s/]+\.[a-z]{2,}([/?#:]|$)/i.test(s)) return "https://" + s;
+  return undefined;
+}
+
 const ANON_KEY = "sb_publishable_Lm1ZUwWhD_bq1IwpAFH8ZQ_OU2ph4W4";
 
 /* ------------------------- Надёжное хранилище -------------------------
@@ -3128,7 +3139,7 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
     <PlainCard key={m.id} className="py-3.5">
       <div className="text-[11.5px] font-semibold flex items-center gap-1.5" style={{ color: "var(--ink-3)" }}><Calendar size={12} />{new Date(m.date).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "long" })}</div>
       {m.text && <div className="text-[14.5px] font-semibold mt-1 leading-snug" style={{ color: "var(--ink)" }}>{m.text}</div>}
-      {m.link && <a href={m.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-semibold inline-flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} />{t("open_material")}</a>}
+      {m.link && (safeHref(m.link) ? <a href={safeHref(m.link)} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-semibold inline-flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} />{t("open_material")}</a> : <div className="text-[12.5px] mt-1.5 break-words" style={{ color: "var(--ink-3)" }}>{m.link}</div>)}
       <HomeworkSubmitBox material={m} student={student} onSubmitHomework={onSubmitHomework} onOpenLesson={(h) => setLessonSubId(h.id)} autoOpen={openMaterialId === m.id} onAutoOpened={() => setOpenMaterialId(null)} t={t} locale={locale} />
     </PlainCard>
   );
@@ -3159,7 +3170,7 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
                   {g.groupName && <span className="truncate">· {g.groupName}</span>}
                 </div>
                 {g.text && <div className="text-[14.5px] font-semibold mt-1 leading-snug" style={{ color: "var(--ink)" }}>{g.text}</div>}
-                {g.link && <a href={g.link} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-semibold inline-flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} />{t("open_material")}</a>}
+                {g.link && (safeHref(g.link) ? <a href={safeHref(g.link)} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-semibold inline-flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} />{t("open_material")}</a> : <div className="text-[12.5px] mt-1.5 break-words" style={{ color: "var(--ink-3)" }}>{g.link}</div>)}
                 <div className="mt-2.5 pt-2.5" style={{ borderTop: "1px dashed var(--soft-yellow-border)" }}>
                   {g.subs.map((h, i) => <HomeworkStatusCard key={h.id} h={h} isLatest={i === 0} t={t} locale={locale} onOpenLesson={(x) => setLessonSubId(x.id)} />)}
                 </div>
@@ -3796,7 +3807,7 @@ function ProfileTab({ student, onLogout, t, lang, changeLang, theme, changeTheme
 
 /* -------------------------------- Экран входа -------------------------------- */
 // Причина неудачного входа от сервера (mini-app-data v23) → текст на языке приложения.
-const LOGIN_REASON_KEYS = { not_found: "login_err_not_found", no_password: "login_err_no_password", bad_password: "login_err_bad_password", too_many: "login_err_too_many" };
+const LOGIN_REASON_KEYS = { not_found: "login_err_not_found", no_password: "login_err_no_password", bad_password: "login_err_bad_password", too_many: "login_err_too_many", closed: "login_err_closed" };
 function LoginScreen({ phone, setPhone, password, setPassword, loginError, loginLoading, onLogin, lang, changeLang, theme, changeTheme, t }) {
   const [showPass, setShowPass] = useState(false);
   return (
@@ -3953,6 +3964,7 @@ const TRANSLATIONS = {
     login_err_no_password: "Для этого номера ещё не создан пароль. Попросите администратора создать пароль.",
     login_err_bad_password: "Неверный пароль. Введите его точно как в сообщении от центра: большие и маленькие буквы различаются.",
     login_err_too_many: "Слишком много неверных попыток. Подождите 15 минут и попробуйте снова.",
+    login_err_closed: "Доступ закрыт администратором. Обратитесь в центр.",
     loading: "Загрузка…", settings: "Настройки", language: "Язык", theme: "Тема",
     theme_light: "Светлая", theme_dark: "Тёмная",
     month_breakdown: "Разбивка по месяцам", discount_label: "Скидка −{pct}%",
@@ -4080,6 +4092,7 @@ const TRANSLATIONS = {
     login_err_no_password: "No password has been created for this number yet. Ask the administrator to create one.",
     login_err_bad_password: "Wrong password. Type it exactly as in the centre's message: capital and small letters are different.",
     login_err_too_many: "Too many wrong attempts. Wait 15 minutes and try again.",
+    login_err_closed: "Access has been closed by the administrator. Please contact the centre.",
     loading: "Loading…", settings: "Settings", language: "Language", theme: "Theme",
     theme_light: "Light", theme_dark: "Dark",
     month_breakdown: "Breakdown by month", discount_label: "Discount −{pct}%",
@@ -4207,6 +4220,7 @@ const TRANSLATIONS = {
     login_err_no_password: "Bu raqam uchun hali parol yaratilmagan. Administratordan parol yaratishni so'rang.",
     login_err_bad_password: "Parol noto'g'ri. Uni markaz xabaridagidek aynan kiriting: katta va kichik harflar farq qiladi.",
     login_err_too_many: "Juda ko'p noto'g'ri urinish. 15 daqiqa kuting va qayta urinib ko'ring.",
+    login_err_closed: "Kirish administrator tomonidan yopilgan. Markazga murojaat qiling.",
     loading: "Yuklanmoqda…", settings: "Sozlamalar", language: "Til", theme: "Mavzu",
     theme_light: "Yorug'", theme_dark: "Tungi",
     month_breakdown: "Oylar bo'yicha taqsimot", discount_label: "Chegirma −{pct}%",
