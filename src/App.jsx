@@ -44,6 +44,9 @@ const ICON_NODES = {
   Layers: [["path",{"d":"M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"}],["path",{"d":"m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"}],["path",{"d":"m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"}]],
   Keyboard: [["path",{"d":"M10 8h.01"}],["path",{"d":"M12 12h.01"}],["path",{"d":"M14 8h.01"}],["path",{"d":"M16 12h.01"}],["path",{"d":"M18 8h.01"}],["path",{"d":"M6 8h.01"}],["path",{"d":"M7 16h10"}],["path",{"d":"M8 12h.01"}],["rect",{"width":"20","height":"16","x":"2","y":"4","rx":"2"}]],
   ListChecks: [["path",{"d":"m3 17 2 2 4-4"}],["path",{"d":"m3 7 2 2 4-4"}],["path",{"d":"M13 6h8"}],["path",{"d":"M13 12h8"}],["path",{"d":"M13 18h8"}]],
+  ShieldCheck: [["path",{"d":"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"}],["path",{"d":"m9 12 2 2 4-4"}]],
+  CalendarClock: [["path",{"d":"M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"}],["path",{"d":"M16 2v4"}],["path",{"d":"M8 2v4"}],["path",{"d":"M3 10h5"}],["path",{"d":"M17.5 17.5 16 16.3V14"}],["circle",{"cx":"16","cy":"16","r":"6"}]],
+  UserCheck: [["path",{"d":"m16 11 2 2 4-4"}],["path",{"d":"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"}],["circle",{"cx":"9","cy":"7","r":"4"}]],
 };
 function makeIcon(nodes) {
   return function Icon({ size = 24, strokeWidth = 2, color = "currentColor", fill = "none", className = "", style, ...rest }) {
@@ -57,12 +60,12 @@ function makeIcon(nodes) {
 const {
   BookOpen, ClipboardList, Bell, Globe, AlertTriangle, Lock, Bot, Lightbulb, Pin, MessageSquare, Pencil, RotateCcw,
   Sun, Moon, Star, Ban, DoorOpen, Hourglass, Search, Receipt, CreditCard, BarChart3, Dumbbell, ChevronRight, ChevronLeft, Check,
-  Volume2, Languages, Layers, Keyboard, ListChecks,
+  Volume2, Languages, Layers, Keyboard, ListChecks, ShieldCheck, CalendarClock, UserCheck,
 } = Object.fromEntries(Object.entries(ICON_NODES).map(([name, nodes]) => [name, makeIcon(nodes)]));
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v34";
+const APP_VERSION = "v35";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 // Ссылка из задания — открываем только http(s). «javascript:…» и подобное не превращаем в ссылку:
 // иначе по нажатию выполнился бы чужой код. Не похоже на адрес сайта — показываем просто текстом.
@@ -1055,7 +1058,7 @@ function AiExerciseRow({ ex, t, defaultOpen, accent }) {
 // Карточка одной сдачи ДЗ: статус, разбор нейросети, комментарий учителя.
 // Статусы: reviewed — проверил учитель; auto_accepted — принято нейросетью; pending — ждёт учителя
 // или нужно доработать (поле attention объясняет почему); aiStatus "checking" — нейросеть проверяет.
-const HW_REDO_REASONS = ["not_readable", "irrelevant", "not_done", "partial", "teacher_redo", "duplicate", "duplicate_other"];
+const HW_REDO_REASONS = ["not_readable", "wrong_subject", "irrelevant", "not_done", "partial", "teacher_redo", "duplicate", "duplicate_other"];
 function HomeworkStatusCard({ h, isLatest, t, locale, onOpenLesson }) {
   const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
   const [showNotes, setShowNotes] = useState(isLatest);
@@ -1065,6 +1068,7 @@ function HomeworkStatusCard({ h, isLatest, t, locale, onOpenLesson }) {
   else if (h.status === "auto_accepted") { color = GREEN_D; icon = <CheckCircle2 size={13} />; label = t("hw_accepted"); }
   else if (h.aiStatus === "checking") { color = BLUE; icon = <Loader2 size={13} className="animate-spin" />; label = t("ai_checking"); }
   else if (isRedo) { color = BRICK; icon = <AlertTriangle size={13} />; label = t("hw_needs_redo"); }
+  else if (h.status === "pending" && h.attention === "unclear") { color = BLUE; icon = <UserCheck size={13} />; label = t("hw_teacher_will_check"); }
   const notes = h.aiReview?.notes || [];
   const exercises = h.aiReview?.exercises || [];
   return (
@@ -1084,6 +1088,7 @@ function HomeworkStatusCard({ h, isLatest, t, locale, onOpenLesson }) {
         </div>
       )}
       {h.status === "pending" && h.attention === "mostly_done" && <div className="text-[12px] mt-1.5 opacity-80">{t("hw_mostly_done_note")}</div>}
+      {h.status === "pending" && h.attention === "unclear" && <div className="text-[12px] mt-1.5 opacity-80">{t("hw_teacher_will_check_sub")}</div>}
       {h.note && <div className="text-[12.5px] mt-1 opacity-80">{h.note}</div>}
       {h.files?.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mt-1.5">
@@ -1127,6 +1132,20 @@ function HomeworkStatusCard({ h, isLatest, t, locale, onOpenLesson }) {
       )}
       {onOpenLesson && <LessonCta h={h} t={t} onOpen={() => onOpenLesson(h)} />}
     </div>
+  );
+}
+
+// Подпись предмета у задания: цветная точка, предмет и группа — чтобы ученик, который ходит на
+// несколько курсов, не сдал работу по математике в задание по китайскому.
+function hwGroupOf(student, groupId) { return (student.groups || []).find((g) => g.id === groupId) || null; }
+function CourseTag({ group, small }) {
+  if (!group) return null;
+  const [c1] = courseColor(group.course || group.name || "");
+  return (
+    <span className={`inline-flex items-center gap-1 font-bold rounded-full ${small ? "text-[10.5px] px-2 py-0.5" : "text-[11.5px] px-2.5 py-1"} max-w-full`} style={{ background: `${c1}14`, color: c1 }} data-course-tag>
+      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c1 }} />
+      <span className="truncate">{group.course || group.name}{group.course && group.name ? ` · ${group.name}` : ""}</span>
+    </span>
   );
 }
 
@@ -1192,6 +1211,18 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, onOpenLesson, 
         </button>
       ) : (
         <div className="space-y-2">
+          {(() => {
+            // Куда уходит работа: предмет, группа и учитель — видно прямо перед отправкой.
+            const g = hwGroupOf(student, material.groupId);
+            if (!g) return null;
+            const [c1] = courseColor(g.course || g.name || "");
+            return (
+              <div className="text-[12px] px-2.5 py-2 rounded-lg font-semibold flex items-center gap-1.5" style={{ background: `${c1}12`, color: "var(--ink)", border: `1px solid ${c1}40` }} data-submit-to>
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c1 }} />
+                <span className="min-w-0">{t("hw_submit_to", { c: [g.course, g.name, g.teacherName ? t("hw_teacher_short", { n: g.teacherName }) : ""].filter(Boolean).join(" · ") })}</span>
+              </div>
+            );
+          })()}
           {aiOn && <div className="text-[11.5px] p-2 rounded-lg" style={{ background: "var(--soft-blue-bg, #DBEAFE)" }}><Bot size={13} className="inline -mt-0.5 mr-1" />{t("ai_submit_hint")}</div>}
           <div className="grid grid-cols-2 gap-2">
             <label className="text-[12.5px] font-semibold py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer" style={{ background: "var(--surface)", border: "1px solid var(--line)" }}>
@@ -2496,6 +2527,8 @@ function TestSection({ section, answersS, setItem, lang, t, focus, setFocus, tla
             rows={9}
             lang={tlang}
             autoCapitalize="sentences"
+            autoCorrect="off"
+            autoComplete="off"
             spellCheck={false}
             placeholder={t("test_writing_ph", { l: ln })}
             className="w-full rounded-xl p-3 outline-none leading-relaxed"
@@ -2519,17 +2552,30 @@ function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
   const [focus, setFocus] = useState(null);
   const [confirm, setConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Честность теста: сколько раз ученик уходил из приложения (и на сколько секунд), сколько раз
+  // пытался копировать/вставлять. Хранится вместе с прогрессом и уходит учителю вместе с ответами.
+  const [integrity, setIntegrity] = useState(() => cleanTestIntegrity(saved0?.integrity));
+  const [notice, setNotice] = useState(null); // { kind: "away" | "paste" | "copy", n }
+  const [showRules, setShowRules] = useState(!saved0);
+  const awayAtRef = useRef(null);
+  const integrityRef = useRef(integrity);
+  integrityRef.current = integrity;
   const scrollRef = useRef(null);
   const hydrated = useRef(!!saved0);
   const sections = test.sections || [];
   const s = sections[si];
+  // Последнее состояние — через ref: обработчики ухода из приложения создаются один раз и иначе
+  // сохранили бы старые ответы поверх новых.
+  const stateRef = useRef(null);
+  stateRef.current = { answers, si, activeSec };
+  const progressOf = (extra) => JSON.stringify({ ...stateRef.current, integrity: integrityRef.current, ...(extra || {}) });
 
   // Прогресс — на телефоне и в облаке Telegram: вышел посреди теста — продолжит с того же места.
   useEffect(() => {
     if (hydrated.current) return;
     storageGet(key).then((raw) => {
       if (hydrated.current || !raw) return;
-      try { const p = JSON.parse(raw); hydrated.current = true; setAnswers(p.answers || {}); setSi(p.si || 0); setActiveSec(p.activeSec || 0); } catch {}
+      try { const p = JSON.parse(raw); hydrated.current = true; setAnswers(p.answers || {}); setSi(p.si || 0); setActiveSec(p.activeSec || 0); setIntegrity(cleanTestIntegrity(p.integrity)); setShowRules(false); countAwayFrom(p.awayAt); } catch {}
     });
   }, []);
   useEffect(() => {
@@ -2540,10 +2586,67 @@ function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
   useEffect(() => {
     hydrated.current = true;
     const now = Date.now();
-    if (now - saveRef.current < 4000 && activeSec % 5 !== 0) { try { localStorage.setItem(key, JSON.stringify({ answers, si, activeSec })); } catch {} return; }
+    if (now - saveRef.current < 4000 && activeSec % 5 !== 0) { try { localStorage.setItem(key, progressOf()); } catch {} return; }
     saveRef.current = now;
-    storageSet(key, JSON.stringify({ answers, si, activeSec }));
-  }, [answers, si, activeSec]);
+    storageSet(key, progressOf());
+  }, [answers, si, activeSec, integrity]);
+
+  // Уход из приложения во время теста (свернул, переключился на переводчик/браузер, закрыл тест и
+  // вернулся позже). Короткие мигания меньше 2 секунд не считаем.
+  const flash = (kind, n) => { setNotice({ kind, n, k: Date.now() }); };
+  useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(null), notice.kind === "away" ? 6000 : 3000); return () => clearTimeout(id); }, [notice]);
+  function countAwayFrom(at) {
+    const t0 = Number(at) || 0;
+    if (!t0) return;
+    const sec = Math.round((Date.now() - t0) / 1000);
+    if (sec < 2) return;
+    setIntegrity((x) => ({ ...x, away: x.away + 1, awaySec: x.awaySec + Math.min(sec, 6 * 3600) }));
+    flash("away", integrityRef.current.away + 1);
+  }
+  useEffect(() => {
+    if (saved0?.awayAt) countAwayFrom(saved0.awayAt);
+    const leave = () => {
+      if (awayAtRef.current) return;
+      awayAtRef.current = Date.now();
+      try { localStorage.setItem(key, progressOf({ awayAt: awayAtRef.current })); } catch {}
+    };
+    const back = () => {
+      const at = awayAtRef.current;
+      if (!at) return;
+      awayAtRef.current = null;
+      countAwayFrom(at);
+    };
+    const onVis = () => (document.visibilityState === "hidden" ? leave() : back());
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("blur", leave);
+    window.addEventListener("focus", back);
+    const tg = window.Telegram && window.Telegram.WebApp;
+    try { tg && tg.onEvent && tg.onEvent("deactivated", leave); tg && tg.onEvent && tg.onEvent("activated", back); } catch {}
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("blur", leave);
+      window.removeEventListener("focus", back);
+      try { tg && tg.offEvent && tg.offEvent("deactivated", leave); tg && tg.offEvent && tg.offEvent("activated", back); } catch {}
+    };
+  }, []);
+  // Закрыл тест крестиком, не сдав, — это тоже выход: при следующем открытии он будет посчитан.
+  const submittedRef = useRef(false);
+  const closeTest = () => {
+    if (!submittedRef.current && !showRules) { try { const v = progressOf({ awayAt: Date.now() }); localStorage.setItem(key, v); storageSet(key, v); } catch {} }
+    onClose();
+  };
+  // Копирование, вырезание, вставка и меню «Копировать/Перевести» во время теста отключены.
+  const blockCopy = (e) => { e.preventDefault(); setIntegrity((x) => ({ ...x, copyTry: x.copyTry + 1 })); flash("copy"); };
+  const blockPaste = (e) => { e.preventDefault(); setIntegrity((x) => ({ ...x, pasteTry: x.pasteTry + 1 })); flash("paste"); haptic("warning"); };
+  // Вставка с клавиатуры телефона (кнопка «Вставить» из буфера) приходит как beforeinput — ловим и её.
+  const rootRef = useRef(null);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const onBefore = (e) => { if (/^insertFrom(Paste|Drop|PasteAsQuotation)$/.test(e.inputType || "")) blockPaste(e); };
+    el.addEventListener("beforeinput", onBefore);
+    return () => el.removeEventListener("beforeinput", onBefore);
+  }, []);
   useEffect(() => { scrollRef.current?.scrollTo?.(0, 0); setFocus(null); }, [si]);
   useEffect(() => { const prev = document.body.style.overflow; document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = prev; }; }, []);
 
@@ -2552,17 +2655,19 @@ function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
   const doSubmit = async () => {
     setConfirm(false);
     setSubmitting(true);
-    const res = await onSubmit(answers, activeSec);
+    const res = await onSubmit(answers, activeSec, integrityRef.current);
     setSubmitting(false);
-    if (res) storageRemove(key);
+    if (res) { submittedRef.current = true; storageRemove(key); }
   };
   const sectionPoints = (sec) => (sec.type === "writing" ? sec.maxPoints : (sectionItems(sec).filter((x) => !x.example).length * (sec.points || 1)));
 
   return createPortal(
-    <div className={`${document.querySelector(".theme-dark") ? "theme-dark" : "theme-light"} fixed inset-0 z-[120] flex flex-col`} style={{ background: "var(--paper)", color: "var(--ink)" }}>
+    <div className={`${document.querySelector(".theme-dark") ? "theme-dark" : "theme-light"} gu-test-lock notranslate fixed inset-0 z-[120] flex flex-col`} translate="no" style={{ background: "var(--paper)", color: "var(--ink)" }}
+      ref={rootRef} onCopy={blockCopy} onCut={blockCopy} onPaste={blockPaste} onDrop={blockPaste} onContextMenu={(e) => e.preventDefault()} onDragStart={(e) => e.preventDefault()}>
+      <style>{`.gu-test-lock{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}.gu-test-lock input,.gu-test-lock textarea{-webkit-user-select:text;user-select:text}`}</style>
       <div className="shrink-0 px-4 pb-3" style={{ background: "var(--surface)", borderBottom: "1px solid var(--line)", paddingTop: "calc(14px + var(--gu-safe-top, env(safe-area-inset-top, 0px)))" }}>
         <div className="flex items-center gap-3 max-w-md mx-auto">
-          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }} aria-label={t("close")}><X size={16} /></button>
+          <button onClick={closeTest} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }} aria-label={t("close")}><X size={16} /></button>
           <div className="min-w-0 flex-1">
             <div className="text-[15px] font-extrabold truncate">{test.title}</div>
             <div className="text-[11.5px]" style={{ color: "var(--ink-sub)" }}>{t("test_attempt_n", { n: no, m: info.maxAttempts || 3 })}</div>
@@ -2628,9 +2733,35 @@ function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
           <div className="rounded-3xl px-6 py-5 flex items-center gap-3 text-[14px] font-semibold" style={{ background: "var(--surface)" }}><Loader2 size={20} className="animate-spin" style={{ color: BLUE }} />{t("test_checking_long")}</div>
         </div>
       )}
+      {notice && (
+        <div key={notice.k} data-test-notice={notice.kind} className="anim-pop fixed left-4 right-4 z-[135] max-w-md mx-auto rounded-2xl px-4 py-3 text-[13px] font-semibold flex items-start gap-2 shadow-lg"
+          style={{ top: "calc(86px + var(--gu-safe-top, env(safe-area-inset-top, 0px)))", background: notice.kind === "away" ? "var(--soft-red-bg)" : "var(--soft-yellow-bg)", color: notice.kind === "away" ? "var(--soft-red-fg)" : "var(--soft-yellow-fg)" }}>
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+          <span>{notice.kind === "away" ? t("test_away_warn", { n: notice.n }) : notice.kind === "paste" ? t("test_paste_blocked") : t("test_copy_blocked")}</span>
+        </div>
+      )}
+      {showRules && (
+        <div className="fixed inset-0 z-[138] flex items-end justify-center" style={{ background: "rgba(0,0,0,0.45)" }}>
+          <div className="anim-pop w-full max-w-md rounded-t-3xl p-6" style={{ background: "var(--surface)", paddingBottom: "calc(24px + var(--gu-safe-bottom, 0px))" }}>
+            <div className="text-[17px] font-extrabold flex items-center gap-2"><ShieldCheck size={20} style={{ color: BLUE }} />{t("test_rules_title")}</div>
+            <ul className="mt-3 space-y-2 text-[13.5px] leading-snug" style={{ color: "var(--ink-2)" }}>
+              <li>• {t("test_rule_own")}</li>
+              <li>• {t("test_rule_copy")}</li>
+              <li>• {t("test_rule_away")}</li>
+              <li>• {t("test_rule_keyboard")}</li>
+            </ul>
+            <button onClick={() => setShowRules(false)} className="w-full mt-5 py-3.5 rounded-2xl text-[15px] font-bold text-white" style={{ background: BLUE }}>{t("test_rules_ok")}</button>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   );
+}
+
+function cleanTestIntegrity(x) {
+  const n = (v) => Math.max(0, Math.round(Number(v) || 0));
+  return { away: n(x && x.away), awaySec: n(x && x.awaySec), copyTry: n(x && x.copyTry), pasteTry: n(x && x.pasteTry) };
 }
 
 // Текст вопроса для разбора ошибок.
@@ -2824,12 +2955,13 @@ function TestResultView({ test, result, info, lang, t, onClose, onRetake }) {
 
       <div className="shrink-0 px-4 pt-3" style={{ background: "var(--surface)", borderTop: "1px solid var(--line)", paddingBottom: "calc(12px + var(--gu-safe-bottom, env(safe-area-inset-bottom, 0px)))" }}>
         <div className="max-w-md mx-auto space-y-2">
+          {mode === "result" && status === "failed_final" && info?.restudyPlan && <RestudyPlanNote plan={info.restudyPlan} t={t} lang={lang} />}
           {mode === "result" && (passed || status === "checking" || status === "failed_final") && (
             <button onClick={onClose} className="w-full py-3.5 rounded-2xl text-[15px] font-bold text-white" style={{ background: passed ? GREEN_D : BLUE }}>{t("quiz_done")}</button>
           )}
           {mode === "result" && (status === "retake" || status === "needs_teacher") && (
             <>
-              {status === "needs_teacher" && !info?.restudyDoneAt && <div className="text-[12.5px] text-center" style={{ color: "var(--ink-2)" }}>{t("test_wait_teacher")}</div>}
+              {status === "needs_teacher" && !info?.restudyDoneAt && (info?.restudyPlan ? <RestudyPlanNote plan={info.restudyPlan} t={t} lang={lang} /> : <div className="text-[12.5px] text-center" style={{ color: "var(--ink-2)" }}>{t("test_wait_teacher")}</div>)}
               <button onClick={() => setMode("restudy")} className="w-full py-3.5 rounded-2xl text-[15px] font-bold text-white flex items-center justify-center gap-2" style={{ background: BLUE }}><BookOpen size={17} />{t("test_restudy_btn")}</button>
             </>
           )}
@@ -2843,6 +2975,21 @@ function TestResultView({ test, result, info, lang, t, onClose, onRetake }) {
       </div>
     </div>,
     document.body
+  );
+}
+
+// Повторное занятие, которое назначил учитель: дата, время и что повторить.
+function RestudyPlanNote({ plan, t, lang }) {
+  if (!plan || !plan.at) return null;
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  const hasTime = String(plan.at).length > 10;
+  const d = new Date(hasTime ? plan.at : `${plan.at}T00:00`);
+  const text = Number.isNaN(d.getTime()) ? String(plan.at) : d.toLocaleString(locale, { weekday: "short", day: "numeric", month: "long", ...(hasTime ? { hour: "2-digit", minute: "2-digit" } : {}) });
+  return (
+    <div className="mt-2 p-2.5 rounded-[14px] text-[12.5px] leading-snug flex gap-2" style={{ background: "var(--soft-blue-bg)", color: "var(--soft-blue-fg)" }} data-restudy-plan>
+      <CalendarClock size={16} className="shrink-0 mt-0.5" />
+      <div><b>{t("test_restudy_plan", { d: text })}</b>{plan.note && <div className="mt-0.5" style={{ color: "var(--ink-2)" }}>{t("test_restudy_note", { n: plan.note })}</div>}</div>
+    </div>
   );
 }
 
@@ -2880,9 +3027,9 @@ function TestsScreen({ student, t, lang, api }) {
     if (res?.error) { setErr(res.error); return; }
     setView({ test: res.test, result: res.testResult, key: x });
   };
-  const submit = async (answers, activeSec) => {
+  const submit = async (answers, activeSec, integrity) => {
     const x = player.info;
-    const res = await api({ submitTest: { studentId: student.id, groupId: x.groupId, testId: x.testId, answers, activeSec, lang } }, 90000);
+    const res = await api({ submitTest: { studentId: student.id, groupId: x.groupId, testId: x.testId, answers, activeSec, lang, integrity } }, 90000);
     if (res?.error) { setErr(res.error); haptic("error"); return null; }
     haptic(res.testResult?.status === "passed" ? "success" : "warning");
     setPlayer(null);
@@ -2914,7 +3061,9 @@ function TestsScreen({ student, t, lang, api }) {
               {last && <Chip tone="neutral"><Clock size={11} />{fmtMinutes(last.activeSec, t)}</Chip>}
               {(x.attempts || []).length > 0 && x.status !== "passed" && <Chip tone="neutral">{t("test_attempts_used", { n: x.attempts.length, m: x.maxAttempts || 3 })}</Chip>}
             </div>
-            {x.status === "needs_teacher" && !x.restudyDoneAt && <div className="text-[12px] mt-2" style={{ color: "var(--soft-red-fg)" }}>{t("test_wait_teacher")}</div>}
+            {x.restudyPlan ? <RestudyPlanNote plan={x.restudyPlan} t={t} lang={lang} />
+              : x.status === "needs_teacher" && !x.restudyDoneAt && <div className="text-[12px] mt-2" style={{ color: "var(--soft-red-fg)" }}>{t("test_wait_teacher")}</div>}
+            {x.extraAttempts > 0 && x.status === "retake" && x.canStart && <div className="text-[12px] mt-2 font-semibold" style={{ color: "var(--soft-green-fg)" }}>{t("test_extra_attempt")}</div>}
           </div>
         </div>
         {btn && (
@@ -3124,7 +3273,7 @@ function checkedHomeworkGroups(student) {
   for (const [key, subs] of byKey) {
     if (!subs.some(isChecked)) continue;
     const m = mats[key] || subs[0].material || {};
-    out.push({ key, subs, date: m.date || subs[0].submittedAt, text: m.text || "", link: m.link || "", groupName: groupsById[subs[0].groupId]?.name || "", latest: subs[0].submittedAt });
+    out.push({ key, subs, date: m.date || subs[0].submittedAt, text: m.text || "", link: m.link || "", groupId: subs[0].groupId || null, groupName: groupsById[subs[0].groupId]?.name || "", latest: subs[0].submittedAt });
   }
   return out.sort((a, b) => new Date(b.latest) - new Date(a.latest));
 }
@@ -3155,9 +3304,17 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
   const hwTabKey = `gu_hw_tab_${student.id}`;
   const [hwTab, setHwTabRaw] = useState(() => { try { return localStorage.getItem(hwTabKey) || "tasks"; } catch { return "tasks"; } });
   const setHwTab = (v) => { haptic("light"); setHwTabRaw(v); try { localStorage.setItem(hwTabKey, v); } catch {} };
-  const checked = checkedHomeworkGroups(student);
-  const materials = [...(student.materials || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
-  const tasks = computeHomeworkTasks(student);
+  // Несколько предметов — фильтр «Все предметы / Английский / Китайский…» и подпись предмета у каждого задания.
+  const hwGroups = (student.groups || []).filter((g) => (student.materials || []).some((m) => m.groupId === g.id));
+  const multiCourse = (student.groups || []).length > 1;
+  const courseKey = `gu_hw_course_${student.id}`;
+  const [courseRaw, setCourseRaw] = useState(() => { try { return localStorage.getItem(courseKey) || "all"; } catch { return "all"; } });
+  const course = courseRaw !== "all" && hwGroups.some((g) => g.id === courseRaw) ? courseRaw : "all";
+  const setCourse = (v) => { haptic("light"); setCourseRaw(v); try { localStorage.setItem(courseKey, v); } catch {} };
+  const inCourse = (gid) => course === "all" || gid === course;
+  const checked = checkedHomeworkGroups(student).filter((g) => !g.groupId || inCourse(g.groupId));
+  const materials = [...(student.materials || [])].filter((m) => inCourse(m.groupId)).sort((a, b) => new Date(b.date) - new Date(a.date));
+  const tasks = computeHomeworkTasks(student).filter((x) => inCourse(x.m.groupId || (x.h && x.h.groupId)));
   const openTask = (task) => {
     haptic("light");
     if (task.kind === "quiz") { setLessonSubId(task.h.id); return; }
@@ -3167,13 +3324,29 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
   const [latest, ...older] = materials;
   const renderItem = (m) => (
     <PlainCard key={m.id} className="py-3.5">
+      {multiCourse && hwGroupOf(student, m.groupId) && <div className="mb-1.5"><CourseTag group={hwGroupOf(student, m.groupId)} /></div>}
       <div className="text-[11.5px] font-semibold flex items-center gap-1.5" style={{ color: "var(--ink-3)" }}><Calendar size={12} />{new Date(m.date).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "long" })}</div>
       {m.text && <div className="text-[14.5px] font-semibold mt-1 leading-snug" style={{ color: "var(--ink)" }}>{m.text}</div>}
       {m.link && (safeHref(m.link) ? <a href={safeHref(m.link)} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-semibold inline-flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} />{t("open_material")}</a> : <div className="text-[12.5px] mt-1.5 break-words" style={{ color: "var(--ink-3)" }}>{m.link}</div>)}
       <HomeworkSubmitBox material={m} student={student} onSubmitHomework={onSubmitHomework} onOpenLesson={(h) => setLessonSubId(h.id)} autoOpen={openMaterialId === m.id} onAutoOpened={() => setOpenMaterialId(null)} t={t} locale={locale} />
     </PlainCard>
   );
+  const courseChips = hwGroups.length > 1 && (
+    <div className="flex flex-wrap gap-1.5" data-course-filter>
+      {[{ id: "all", label: t("hw_all_courses") }, ...hwGroups.map((g) => ({ id: g.id, label: g.course || g.name, g }))].map((x) => {
+        const active = course === x.id;
+        const [c1] = x.g ? courseColor(x.g.course || x.g.name || "") : [null];
+        return (
+          <button key={x.id} onClick={() => setCourse(x.id)} className="shrink-0 text-[12.5px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-colors"
+            style={{ background: active ? (c1 || "var(--ink)") : "var(--surface)", color: active ? "#fff" : "var(--ink-2)", border: `1px solid ${active ? "transparent" : "var(--line)"}` }}>
+            {c1 && !active && <span className="w-1.5 h-1.5 rounded-full" style={{ background: c1 }} />}{x.label}
+          </button>
+        );
+      })}
+    </div>
+  );
   const tabs = (
+    <>
     <div className="flex gap-1 p-1 rounded-2xl" style={{ background: "var(--surface-alt)" }}>
       {[["tasks", t("hw_tab_tasks"), null], ["checked", t("hw_tab_checked"), checked.length]].map(([k, label, n]) => (
         <button key={k} onClick={() => setHwTab(k)} className="flex-1 py-2 rounded-xl text-[13px] font-bold flex items-center justify-center gap-1.5 transition-colors"
@@ -3182,6 +3355,8 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
         </button>
       ))}
     </div>
+    {courseChips}
+    </>
   );
   if (hwTab === "checked") {
     return (
@@ -3232,7 +3407,7 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
                 <IconTile icon={meta.icon} bg={meta.tile} color={meta.color} size={38} iconSize={18} radius={12} />
                 <div className="min-w-0 flex-1">
                   <div className="text-[14px] font-bold truncate" style={{ color: "var(--ink)" }}>{title}</div>
-                  <div className="text-[11.5px] truncate" style={{ color: "var(--ink-sub)" }}>{new Date(task.m.date).toLocaleDateString(locale, { day: "numeric", month: "short" })}</div>
+                  <div className="text-[11.5px] truncate" style={{ color: "var(--ink-sub)" }}>{new Date(task.m.date).toLocaleDateString(locale, { day: "numeric", month: "short" })}{multiCourse && hwGroupOf(student, task.m.groupId) ? ` · ${hwGroupOf(student, task.m.groupId).course || hwGroupOf(student, task.m.groupId).name}` : ""}</div>
                 </div>
                 {meta.btn ? <button onClick={() => openTask(task)} className="text-[12.5px] font-bold text-white px-3.5 py-2 rounded-xl shrink-0 active:scale-95 transition-transform" style={{ background: meta.color }}>{meta.btn}</button> : <Loader2 size={17} className="animate-spin shrink-0" style={{ color: BLUE }} />}
               </div>
@@ -3940,6 +4115,11 @@ const TRANSLATIONS = {
     test_grade_n: "Оценка {n}", test_by_exercise: "Баллы по упражнениям", test_writing_title: "Письменное задание", test_writing_pending_chip: "Проверит учитель", test_writing_pending: "Нейросеть не смогла проверить текст — его проверит учитель.",
     test_mistakes: "Ошибки", test_restudy_title: "Повторение материала", test_restudy_btn: "Повторить материал",
     test_restudy_intro: "Прочитай правило к каждому упражнению, где были ошибки, и посмотри правильные ответы. Потом можно пересдать тест.",
+    test_rules_title: "Правила теста", test_rule_own: "Решай сам — тест показывает, что ты уже знаешь.", test_rule_copy: "Копировать и вставлять текст во время теста нельзя.", test_rule_away: "Если выйдешь из приложения (переводчик, браузер, другое приложение) — учитель это увидит.", test_rule_keyboard: "Подсказки клавиатуры (Т9, автозамену) лучше выключить и писать слова самому — автозамена может испортить ответ.", test_rules_ok: "Понятно, начать",
+    test_away_warn: "Ты выходил из теста (раз: {n}). Учитель это увидит.", test_paste_blocked: "Вставлять текст во время теста нельзя", test_copy_blocked: "Копировать текст во время теста нельзя",
+    test_restudy_plan: "Повторное занятие с учителем: {d}", test_restudy_note: "Повторить: {n}", test_extra_attempt: "Учитель дал ещё одну попытку",
+    hw_redo_wrong_subject: "Похоже, это работа по другому предмету. Сдай её в задание нужного предмета, а сюда — работу по этому предмету.", hw_teacher_will_check: "Работу проверит учитель", hw_teacher_will_check_sub: "Нейросеть не смогла уверенно разобрать работу, поэтому её посмотрит учитель. Ничего делать не нужно.",
+    hw_all_courses: "Все предметы", hw_submit_to: "Сдаёшь: {c}", hw_teacher_short: "учитель {n}",
     test_retake_btn: "Пересдать тест (попытка {n} из {m})", test_no_retakes: "Пересдач больше нет", test_wait_teacher: "Ждём повторного занятия с учителем", test_attempts_left: "Осталось пересдач: {n}",
     lesson_now: "идёт сейчас", lesson_in_min: "через {m} мин", lesson_in_hm: "через {h} ч {m} мин", lesson_also: "Ещё сегодня",
     homework_short: "Домашка", progress_short: "Прогресс", service_support_lesson_short: "Суппорт-урок", service_topic_reexplain_short: "Объяснить тему", service_materials_only_short: "Материалы",
@@ -4068,6 +4248,11 @@ const TRANSLATIONS = {
     test_grade_n: "Grade {n}", test_by_exercise: "Points by exercise", test_writing_title: "Writing task", test_writing_pending_chip: "Teacher will check", test_writing_pending: "The AI couldn't check the text — your teacher will.",
     test_mistakes: "Mistakes", test_restudy_title: "Review", test_restudy_btn: "Review the material",
     test_restudy_intro: "Read the rule for each exercise with mistakes and look at the correct answers. Then you can retake the test.",
+    test_rules_title: "Test rules", test_rule_own: "Work on your own — the test shows what you already know.", test_rule_copy: "Copying and pasting text during the test is not allowed.", test_rule_away: "If you leave the app (translator, browser, another app), your teacher will see it.", test_rule_keyboard: "Better turn off keyboard suggestions and autocorrect and type words yourself — autocorrect can spoil an answer.", test_rules_ok: "Got it, start",
+    test_away_warn: "You left the test (times: {n}). Your teacher will see it.", test_paste_blocked: "Pasting text during the test is not allowed", test_copy_blocked: "Copying text during the test is not allowed",
+    test_restudy_plan: "Review lesson with the teacher: {d}", test_restudy_note: "To review: {n}", test_extra_attempt: "Your teacher gave you one more attempt",
+    hw_redo_wrong_subject: "This looks like work for another subject. Submit it to that subject's task, and send this subject's work here.", hw_teacher_will_check: "Your teacher will check this work", hw_teacher_will_check_sub: "The AI couldn't read the work reliably, so your teacher will look at it. Nothing to do.",
+    hw_all_courses: "All subjects", hw_submit_to: "Submitting to: {c}", hw_teacher_short: "teacher {n}",
     test_retake_btn: "Retake (attempt {n} of {m})", test_no_retakes: "No retakes left", test_wait_teacher: "Waiting for a review lesson with the teacher", test_attempts_left: "Retakes left: {n}",
     lesson_now: "in progress", lesson_in_min: "in {m} min", lesson_in_hm: "in {h} h {m} min", lesson_also: "Also today",
     homework_short: "Homework", progress_short: "Progress", service_support_lesson_short: "Support lesson", service_topic_reexplain_short: "Explain a topic", service_materials_only_short: "Materials",
@@ -4196,6 +4381,11 @@ const TRANSLATIONS = {
     test_grade_n: "Baho {n}", test_by_exercise: "Mashqlar bo'yicha ballar", test_writing_title: "Yozma topshiriq", test_writing_pending_chip: "O'qituvchi tekshiradi", test_writing_pending: "Sun'iy intellekt matnni tekshira olmadi — uni o'qituvchi tekshiradi.",
     test_mistakes: "Xatolar", test_restudy_title: "Mavzuni takrorlash", test_restudy_btn: "Mavzuni takrorlash",
     test_restudy_intro: "Xato bo'lgan har bir mashq qoidasini o'qing va to'g'ri javoblarni ko'ring. Keyin testni qayta topshirish mumkin.",
+    test_rules_title: "Test qoidalari", test_rule_own: "O'zing yech — test nimani bilishingni ko'rsatadi.", test_rule_copy: "Test paytida matnni nusxalash va qo'yish mumkin emas.", test_rule_away: "Ilovadan chiqsang (tarjimon, brauzer, boshqa ilova) — o'qituvchi buni ko'radi.", test_rule_keyboard: "Klaviatura takliflari va avtotuzatishni o'chirib, so'zlarni o'zing yozganing ma'qul — avtotuzatish javobni buzishi mumkin.", test_rules_ok: "Tushunarli, boshlash",
+    test_away_warn: "Testdan chiqding (marta: {n}). O'qituvchi buni ko'radi.", test_paste_blocked: "Test paytida matn qo'yish mumkin emas", test_copy_blocked: "Test paytida matnni nusxalash mumkin emas",
+    test_restudy_plan: "O'qituvchi bilan takroriy dars: {d}", test_restudy_note: "Takrorlash: {n}", test_extra_attempt: "O'qituvchi yana bitta urinish berdi",
+    hw_redo_wrong_subject: "Bu boshqa fan bo'yicha ishga o'xshaydi. Uni kerakli fan vazifasiga topshir, bu yerga esa shu fan bo'yicha ishni yubor.", hw_teacher_will_check: "Ishni o'qituvchi tekshiradi", hw_teacher_will_check_sub: "Sun'iy intellekt ishni ishonchli o'qiy olmadi, shuning uchun uni o'qituvchi ko'radi. Hech narsa qilish shart emas.",
+    hw_all_courses: "Barcha fanlar", hw_submit_to: "Topshirilmoqda: {c}", hw_teacher_short: "o'qituvchi {n}",
     test_retake_btn: "Qayta topshirish ({m} dan {n}-urinish)", test_no_retakes: "Boshqa urinish yo'q", test_wait_teacher: "O'qituvchi bilan qayta darsni kutamiz", test_attempts_left: "Qolgan urinishlar: {n}",
     lesson_now: "hozir davom etmoqda", lesson_in_min: "{m} daqiqadan keyin", lesson_in_hm: "{h} soat {m} daqiqadan keyin", lesson_also: "Bugun yana",
     homework_short: "Uy vazifa", progress_short: "Natijalar", service_support_lesson_short: "Qo'shimcha dars", service_topic_reexplain_short: "Mavzuni tushuntirish", service_materials_only_short: "Materiallar",
