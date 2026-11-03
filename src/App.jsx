@@ -65,7 +65,7 @@ const {
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v35";
+const APP_VERSION = "v36";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 // Ссылка из задания — открываем только http(s). «javascript:…» и подобное не превращаем в ссылку:
 // иначе по нажатию выполнился бы чужой код. Не похоже на адрес сайта — показываем просто текстом.
@@ -2280,7 +2280,7 @@ function OptionPill({ text, selected, onClick, disabled }) {
 }
 
 // Одно упражнение. answersS — ответы этого упражнения { itemId: value }, setItem(itemId, value).
-function TestSection({ section, answersS, setItem, lang, t, focus, setFocus, tlang = "en" }) {
+function TestSection({ section, answersS, setItem, lang, t, focus, setFocus, tlang = "en", wide }) {
   const s = section;
   const cjk = tlang === "zh";
   // «по-немецки», «по-китайски» — в подсказках полей ввода
@@ -2338,7 +2338,7 @@ function TestSection({ section, answersS, setItem, lang, t, focus, setFocus, tla
       )}
 
       {s.type === "picture" && (
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className={`grid ${wide ? "grid-cols-3" : "grid-cols-2"} gap-2.5`}>
           {items.map((it) => (
             <div key={it.id} className="rounded-[18px] p-2.5" style={{ background: "var(--surface)", boxShadow: "0 2px 10px rgba(26,26,23,0.05)" }}>
               <img src={it.image} alt="" className="w-full aspect-square object-contain rounded-xl" style={{ background: "#fff" }} />
@@ -2542,7 +2542,8 @@ function TestSection({ section, answersS, setItem, lang, t, focus, setFocus, tla
 }
 
 // ---------- Прохождение теста (на весь экран) ----------
-function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
+function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit, wide }) {
+  const W = wide ? "max-w-3xl" : "max-w-md"; // на компьютере тест шире
   const no = info?.inProgress?.no || (info?.attempts?.length || 0) + 1;
   const key = `gu_test_${studentId}_${info.groupId}_${test.id}_${no}`;
   const saved0 = useMemo(() => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; } }, []);
@@ -2666,7 +2667,7 @@ function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
       ref={rootRef} onCopy={blockCopy} onCut={blockCopy} onPaste={blockPaste} onDrop={blockPaste} onContextMenu={(e) => e.preventDefault()} onDragStart={(e) => e.preventDefault()}>
       <style>{`.gu-test-lock{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}.gu-test-lock input,.gu-test-lock textarea{-webkit-user-select:text;user-select:text}`}</style>
       <div className="shrink-0 px-4 pb-3" style={{ background: "var(--surface)", borderBottom: "1px solid var(--line)", paddingTop: "calc(14px + var(--gu-safe-top, env(safe-area-inset-top, 0px)))" }}>
-        <div className="flex items-center gap-3 max-w-md mx-auto">
+        <div className={`flex items-center gap-3 ${W} mx-auto`}>
           <button onClick={closeTest} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }} aria-label={t("close")}><X size={16} /></button>
           <div className="min-w-0 flex-1">
             <div className="text-[15px] font-extrabold truncate">{test.title}</div>
@@ -2674,7 +2675,7 @@ function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
           </div>
           <div className="flex items-center gap-1 text-[13px] font-bold px-2.5 py-1.5 rounded-full mono" style={{ background: "var(--surface-alt)" }}><Clock size={13} />{fmtClock(activeSec)}</div>
         </div>
-        <div className="flex gap-1 mt-3 max-w-md mx-auto">
+        <div className={`flex gap-1 mt-3 ${W} mx-auto`}>
           {sections.map((sec, i) => (
             <button key={sec.id} onClick={() => setSi(i)} className="flex-1 h-7 rounded-lg text-[11.5px] font-bold transition-colors"
               style={{ background: i === si ? BLUE : sectionDone(sec, answers) ? "var(--soft-green-bg)" : "var(--surface-alt)", color: i === si ? "#fff" : sectionDone(sec, answers) ? "var(--soft-green-fg)" : "var(--ink-2)" }}>
@@ -2685,7 +2686,7 @@ function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
-        <div className="max-w-md mx-auto space-y-3">
+        <div className={`${W} mx-auto space-y-3`}>
           <div>
             <div className="flex items-center justify-between">
               <div className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--ink-3)" }}>{t("test_exercise_n", { n: si + 1, m: sections.length })}</div>
@@ -2698,12 +2699,12 @@ function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
               </div>
             )}
           </div>
-          <TestSection key={s.id} section={s} answersS={answers[s.id] || {}} setItem={setItem} lang={lang} t={t} focus={focus} setFocus={setFocus} tlang={testLangOf(test.course)} />
+          <TestSection key={s.id} section={s} answersS={answers[s.id] || {}} setItem={setItem} lang={lang} t={t} focus={focus} setFocus={setFocus} tlang={testLangOf(test.course)} wide={wide} />
         </div>
       </div>
 
       <div className="shrink-0 px-4 pt-3" style={{ background: "var(--surface)", borderTop: "1px solid var(--line)", paddingBottom: "calc(12px + var(--gu-safe-bottom, env(safe-area-inset-bottom, 0px)))" }}>
-        <div className="max-w-md mx-auto flex gap-2">
+        <div className={`${W} mx-auto flex gap-2`}>
           <button onClick={() => setSi(Math.max(0, si - 1))} disabled={si === 0} className="px-4 py-3.5 rounded-2xl text-[14px] font-semibold disabled:opacity-40" style={{ background: "var(--surface-alt)" }}><ChevronLeft size={18} /></button>
           {si < sections.length - 1 ? (
             <button onClick={() => setSi(si + 1)} className="flex-1 py-3.5 rounded-2xl text-[15px] font-bold text-white flex items-center justify-center gap-1" style={{ background: BLUE }}>{t("quiz_next")}<ChevronRight size={18} /></button>
@@ -2734,7 +2735,7 @@ function TestPlayer({ test, info, studentId, lang, t, onClose, onSubmit }) {
         </div>
       )}
       {notice && (
-        <div key={notice.k} data-test-notice={notice.kind} className="anim-pop fixed left-4 right-4 z-[135] max-w-md mx-auto rounded-2xl px-4 py-3 text-[13px] font-semibold flex items-start gap-2 shadow-lg"
+        <div key={notice.k} data-test-notice={notice.kind} className={`anim-pop fixed left-4 right-4 z-[135] ${W} mx-auto rounded-2xl px-4 py-3 text-[13px] font-semibold flex items-start gap-2 shadow-lg`}
           style={{ top: "calc(86px + var(--gu-safe-top, env(safe-area-inset-top, 0px)))", background: notice.kind === "away" ? "var(--soft-red-bg)" : "var(--soft-yellow-bg)", color: notice.kind === "away" ? "var(--soft-red-fg)" : "var(--soft-yellow-fg)" }}>
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
           <span>{notice.kind === "away" ? t("test_away_warn", { n: notice.n }) : notice.kind === "paste" ? t("test_paste_blocked") : t("test_copy_blocked")}</span>
@@ -2782,7 +2783,8 @@ function givenText(section, item, given) {
 }
 
 // ---------- Экран результата + повторение материала ----------
-function TestResultView({ test, result, info, lang, t, onClose, onRetake }) {
+function TestResultView({ test, result, info, lang, t, onClose, onRetake, wide }) {
+  const W = wide ? "max-w-3xl" : "max-w-md";
   const [mode, setMode] = useState("result"); // result | restudy
   const [openSec, setOpenSec] = useState(null);
   const scrollRef = useRef(null);
@@ -2810,7 +2812,7 @@ function TestResultView({ test, result, info, lang, t, onClose, onRetake }) {
   return createPortal(
     <div className={`${document.querySelector(".theme-dark") ? "theme-dark" : "theme-light"} fixed inset-0 z-[125] flex flex-col`} style={{ background: "var(--paper)", color: "var(--ink)" }}>
       <div className="shrink-0 px-4 pb-3" style={{ background: "var(--surface)", borderBottom: "1px solid var(--line)", paddingTop: "calc(14px + var(--gu-safe-top, env(safe-area-inset-top, 0px)))" }}>
-        <div className="flex items-center gap-3 max-w-md mx-auto">
+        <div className={`flex items-center gap-3 ${W} mx-auto`}>
           <button onClick={mode === "restudy" ? () => setMode("result") : onClose} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }}>{mode === "restudy" ? <ChevronLeft size={18} /> : <X size={16} />}</button>
           <div className="min-w-0 flex-1">
             <div className="text-[15px] font-extrabold truncate">{mode === "restudy" ? t("test_restudy_title") : t("test_result_title")}</div>
@@ -2820,7 +2822,7 @@ function TestResultView({ test, result, info, lang, t, onClose, onRetake }) {
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-5">
-        <div className="max-w-md mx-auto space-y-3">
+        <div className={`${W} mx-auto space-y-3`}>
           {mode === "result" && (
             <>
               <div className="rounded-[26px] p-5 text-center" style={{ background: "var(--surface)", boxShadow: "0 6px 20px rgba(26,26,23,0.07)" }}>
@@ -2954,7 +2956,7 @@ function TestResultView({ test, result, info, lang, t, onClose, onRetake }) {
       </div>
 
       <div className="shrink-0 px-4 pt-3" style={{ background: "var(--surface)", borderTop: "1px solid var(--line)", paddingBottom: "calc(12px + var(--gu-safe-bottom, env(safe-area-inset-bottom, 0px)))" }}>
-        <div className="max-w-md mx-auto space-y-2">
+        <div className={`${W} mx-auto space-y-2`}>
           {mode === "result" && status === "failed_final" && info?.restudyPlan && <RestudyPlanNote plan={info.restudyPlan} t={t} lang={lang} />}
           {mode === "result" && (passed || status === "checking" || status === "failed_final") && (
             <button onClick={onClose} className="w-full py-3.5 rounded-2xl text-[15px] font-bold text-white" style={{ background: passed ? GREEN_D : BLUE }}>{t("quiz_done")}</button>
@@ -2994,7 +2996,7 @@ function RestudyPlanNote({ plan, t, lang }) {
 }
 
 // ---------- Экран «Тесты» ----------
-function TestsScreen({ student, t, lang, api }) {
+function TestsScreen({ student, t, lang, api, desktop, onResultClosed }) {
   const locale = LOCALE_OF[lang] || "ru-RU";
   const tests = student.tests || [];
   const [busy, setBusy] = useState(null);
@@ -3033,7 +3035,7 @@ function TestsScreen({ student, t, lang, api }) {
     if (res?.error) { setErr(res.error); haptic("error"); return null; }
     haptic(res.testResult?.status === "passed" ? "success" : "warning");
     setPlayer(null);
-    setView({ test: player.test, result: res.testResult, key: x });
+    setView({ test: player.test, result: res.testResult, key: x, fresh: true });
     return res;
   };
 
@@ -3049,8 +3051,8 @@ function TestsScreen({ student, t, lang, api }) {
     else if (x.canStart && (x.status === "retake" || x.status === "needs_teacher")) btn = { label: t("test_btn_retake"), act: () => openResult(x), color: BRICK };
     else if ((x.attempts || []).length) btn = { label: t("test_btn_result"), act: () => openResult(x), color: "var(--ink-2)", ghost: true };
     return (
-      <PlainCard key={x.testId + x.groupId} className="py-3.5">
-        <div className="flex items-start gap-3">
+      <PlainCard key={x.testId + x.groupId} className={desktop ? "py-4 h-full flex flex-col" : "py-3.5"}>
+        <div className={`flex items-start gap-3 ${desktop ? "flex-1" : ""}`}>
           <IconTile icon={x.kind === "vocab" ? Pencil : ClipboardList} bg={x.kind === "vocab" ? "var(--soft-purple-bg)" : "var(--soft-blue-bg)"} color={x.kind === "vocab" ? PURPLE : BLUE} />
           <div className="min-w-0 flex-1">
             <div className="text-[15px] font-extrabold leading-tight">{x.title}</div>
@@ -3076,6 +3078,49 @@ function TestsScreen({ student, t, lang, api }) {
     );
   };
 
+  const overlays = (
+    <>
+      {player && <TestPlayer test={player.test} info={player.info} studentId={student.id} lang={lang} t={t} onClose={() => setPlayer(null)} onSubmit={submit} wide={desktop} />}
+      {view && (
+        <TestResultView
+          test={view.test} result={view.result} info={infoOf(view.key)} lang={lang} t={t} wide={desktop}
+          onClose={() => { const fresh = view.fresh; setView(null); if (fresh && onResultClosed) onResultClosed(); }}
+          onRetake={() => { const k = view.key; setView(null); start(infoOf(k)); }}
+        />
+      )}
+    </>
+  );
+
+  // Компьютерная версия: тесты по каждому предмету (группе) отдельным блоком, карточки сеткой.
+  if (desktop) {
+    const groups = student.groups || [];
+    return (
+      <div className="space-y-7">
+        {err && <div className="p-3 rounded-[16px] text-[13.5px]" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>{err}</div>}
+        {groups.length === 0 && <PlainCard><EmptyState text={t("tests_empty")} icon={ClipboardList} /></PlainCard>}
+        {groups.map((g) => {
+          const list = tests.filter((x) => x.groupId === g.id);
+          const ordered = [...list.filter((x) => todo.includes(x)), ...list.filter((x) => !todo.includes(x))];
+          const [c1] = courseColor(g.course || g.name || "");
+          return (
+            <section key={g.id} data-kiosk-group={g.id}>
+              <div className="flex items-center gap-2.5 mb-3 flex-wrap">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ background: c1 }} />
+                <h2 className="text-[19px] font-extrabold">{g.course || g.name}</h2>
+                <span className="text-[13.5px]" style={{ color: "var(--ink-sub)" }}>{[g.course ? g.name : "", g.teacherName ? t("kiosk_teacher", { n: g.teacherName }) : ""].filter(Boolean).join(" · ")}</span>
+                {list.some((x) => todo.includes(x)) && <Chip tone="red">{t("tests_todo")}: {list.filter((x) => todo.includes(x)).length}</Chip>}
+              </div>
+              {list.length === 0
+                ? <div className="rounded-[20px] px-5 py-4 text-[14px]" style={{ background: "var(--surface)", color: "var(--ink-sub)", border: "1px dashed var(--line)" }}>{t("kiosk_no_tests")}</div>
+                : <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5">{ordered.map(renderCard)}</div>}
+            </section>
+          );
+        })}
+        {overlays}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3 pt-1.5">
       {err && <div className="p-3 rounded-[16px] text-[13px]" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }}>{err}</div>}
@@ -3084,14 +3129,7 @@ function TestsScreen({ student, t, lang, api }) {
       {todo.map(renderCard)}
       {done.length > 0 && <SectionLabel className="mt-4">{t("tests_done")}</SectionLabel>}
       {done.map(renderCard)}
-      {player && <TestPlayer test={player.test} info={player.info} studentId={student.id} lang={lang} t={t} onClose={() => setPlayer(null)} onSubmit={submit} />}
-      {view && (
-        <TestResultView
-          test={view.test} result={view.result} info={infoOf(view.key)} lang={lang} t={t}
-          onClose={() => setView(null)}
-          onRetake={() => { const k = view.key; setView(null); start(infoOf(k)); }}
-        />
-      )}
+      {overlays}
     </div>
   );
 }
@@ -4088,6 +4126,10 @@ function LoginScreen({ phone, setPhone, password, setPassword, loginError, login
           </div>
         </Card>
         <p className="text-[11px] opacity-40 mt-4 text-center px-4">{t("login_remember")}</p>
+        {/* Открыли на компьютере не через Telegram — подсказываем версию для компьютерного класса. */}
+        {!(window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) && window.innerWidth >= 900 && (
+          <a href="?exam" data-exam-link className="block mt-5 text-center text-[13px] font-semibold px-4 py-3 rounded-2xl" style={{ background: "var(--soft-blue-bg)", color: "var(--soft-blue-fg)" }}>{t("login_exam_link")}</a>
+        )}
       </div>
     </div>
   );
@@ -4115,6 +4157,12 @@ const TRANSLATIONS = {
     test_grade_n: "Оценка {n}", test_by_exercise: "Баллы по упражнениям", test_writing_title: "Письменное задание", test_writing_pending_chip: "Проверит учитель", test_writing_pending: "Нейросеть не смогла проверить текст — его проверит учитель.",
     test_mistakes: "Ошибки", test_restudy_title: "Повторение материала", test_restudy_btn: "Повторить материал",
     test_restudy_intro: "Прочитай правило к каждому упражнению, где были ошибки, и посмотри правильные ответы. Потом можно пересдать тест.",
+    login_exam_link: "Сдаёшь тест на компьютере в центре? Открыть версию для компьютера →",
+    kiosk_title: "Тесты на компьютере", kiosk_sub: "Войди по логину и паролю из сообщения центра", kiosk_login: "Логин (номер телефона)", kiosk_password: "Пароль", kiosk_enter: "Войти", kiosk_fill: "Введите номер телефона и пароль",
+    kiosk_shared: "Компьютер общий: вход не запоминается. Когда закончишь — нажми «Выйти». Через 15 минут без действий выход произойдёт сам.", kiosk_logout: "Выйти", kiosk_refresh: "Обновить",
+    kiosk_hello: "{name}, выбери тест", kiosk_hint: "Здесь тесты, которые открыл учитель, — по всем твоим предметам.", kiosk_teacher: "учитель {n}", kiosk_no_tests: "Учитель ещё не открыл тесты по этому предмету.",
+    kiosk_who: "Кто сдаёт тест?", kiosk_switch: "Сменить ученика", kiosk_idle_title: "Ты здесь?", kiosk_idle_text: "Давно нет действий. Выход через {n} с.", kiosk_idle_stay: "Я здесь",
+    kiosk_done_title: "Тест завершён", kiosk_done_text: "Если тестов больше нет — выйди, чтобы следующий ученик не попал в твой аккаунт. Выход сам через {n} с.", kiosk_done_out: "Выйти сейчас", kiosk_done_more: "Пройти ещё тест", kiosk_session_over: "Сеанс закончился — войдите снова",
     test_rules_title: "Правила теста", test_rule_own: "Решай сам — тест показывает, что ты уже знаешь.", test_rule_copy: "Копировать и вставлять текст во время теста нельзя.", test_rule_away: "Если выйдешь из приложения (переводчик, браузер, другое приложение) — учитель это увидит.", test_rule_keyboard: "Подсказки клавиатуры (Т9, автозамену) лучше выключить и писать слова самому — автозамена может испортить ответ.", test_rules_ok: "Понятно, начать",
     test_away_warn: "Ты выходил из теста (раз: {n}). Учитель это увидит.", test_paste_blocked: "Вставлять текст во время теста нельзя", test_copy_blocked: "Копировать текст во время теста нельзя",
     test_restudy_plan: "Повторное занятие с учителем: {d}", test_restudy_note: "Повторить: {n}", test_extra_attempt: "Учитель дал ещё одну попытку",
@@ -4248,6 +4296,12 @@ const TRANSLATIONS = {
     test_grade_n: "Grade {n}", test_by_exercise: "Points by exercise", test_writing_title: "Writing task", test_writing_pending_chip: "Teacher will check", test_writing_pending: "The AI couldn't check the text — your teacher will.",
     test_mistakes: "Mistakes", test_restudy_title: "Review", test_restudy_btn: "Review the material",
     test_restudy_intro: "Read the rule for each exercise with mistakes and look at the correct answers. Then you can retake the test.",
+    login_exam_link: "Taking a test on a computer at the center? Open the computer version →",
+    kiosk_title: "Tests on the computer", kiosk_sub: "Sign in with the login and password from the center's message", kiosk_login: "Login (phone number)", kiosk_password: "Password", kiosk_enter: "Sign in", kiosk_fill: "Enter the phone number and password",
+    kiosk_shared: "This computer is shared: your sign-in is not saved. When you finish, press “Sign out”. After 15 minutes of inactivity you will be signed out automatically.", kiosk_logout: "Sign out", kiosk_refresh: "Refresh",
+    kiosk_hello: "{name}, choose a test", kiosk_hint: "These are the tests your teachers opened — for all your subjects.", kiosk_teacher: "teacher {n}", kiosk_no_tests: "The teacher hasn't opened any tests for this subject yet.",
+    kiosk_who: "Who is taking the test?", kiosk_switch: "Switch student", kiosk_idle_title: "Are you there?", kiosk_idle_text: "No activity for a while. Signing out in {n} s.", kiosk_idle_stay: "I'm here",
+    kiosk_done_title: "Test finished", kiosk_done_text: "If you have no more tests, sign out so the next student doesn't get into your account. Automatic sign-out in {n} s.", kiosk_done_out: "Sign out now", kiosk_done_more: "Take another test", kiosk_session_over: "Session ended — please sign in again",
     test_rules_title: "Test rules", test_rule_own: "Work on your own — the test shows what you already know.", test_rule_copy: "Copying and pasting text during the test is not allowed.", test_rule_away: "If you leave the app (translator, browser, another app), your teacher will see it.", test_rule_keyboard: "Better turn off keyboard suggestions and autocorrect and type words yourself — autocorrect can spoil an answer.", test_rules_ok: "Got it, start",
     test_away_warn: "You left the test (times: {n}). Your teacher will see it.", test_paste_blocked: "Pasting text during the test is not allowed", test_copy_blocked: "Copying text during the test is not allowed",
     test_restudy_plan: "Review lesson with the teacher: {d}", test_restudy_note: "To review: {n}", test_extra_attempt: "Your teacher gave you one more attempt",
@@ -4381,6 +4435,12 @@ const TRANSLATIONS = {
     test_grade_n: "Baho {n}", test_by_exercise: "Mashqlar bo'yicha ballar", test_writing_title: "Yozma topshiriq", test_writing_pending_chip: "O'qituvchi tekshiradi", test_writing_pending: "Sun'iy intellekt matnni tekshira olmadi — uni o'qituvchi tekshiradi.",
     test_mistakes: "Xatolar", test_restudy_title: "Mavzuni takrorlash", test_restudy_btn: "Mavzuni takrorlash",
     test_restudy_intro: "Xato bo'lgan har bir mashq qoidasini o'qing va to'g'ri javoblarni ko'ring. Keyin testni qayta topshirish mumkin.",
+    login_exam_link: "Markazda kompyuterda test topshiryapsanmi? Kompyuter versiyasini ochish →",
+    kiosk_title: "Kompyuterda testlar", kiosk_sub: "Markaz xabaridagi login va parol bilan kiring", kiosk_login: "Login (telefon raqami)", kiosk_password: "Parol", kiosk_enter: "Kirish", kiosk_fill: "Telefon raqami va parolni kiriting",
+    kiosk_shared: "Kompyuter umumiy: kirish eslab qolinmaydi. Tugatgach «Chiqish»ni bosing. 15 daqiqa harakatsizlikdan keyin avtomatik chiqiladi.", kiosk_logout: "Chiqish", kiosk_refresh: "Yangilash",
+    kiosk_hello: "{name}, testni tanla", kiosk_hint: "Bu yerda o'qituvchilar ochgan testlar — barcha fanlaring bo'yicha.", kiosk_teacher: "o'qituvchi {n}", kiosk_no_tests: "O'qituvchi bu fan bo'yicha hali test ochmagan.",
+    kiosk_who: "Testni kim topshiradi?", kiosk_switch: "O'quvchini almashtirish", kiosk_idle_title: "Shu yerdamisan?", kiosk_idle_text: "Uzoq vaqt harakat yo'q. {n} soniyadan keyin chiqiladi.", kiosk_idle_stay: "Shu yerdaman",
+    kiosk_done_title: "Test yakunlandi", kiosk_done_text: "Boshqa test bo'lmasa — chiq, keyingi o'quvchi hisobingga kirib qolmasin. {n} soniyadan keyin avtomatik chiqiladi.", kiosk_done_out: "Hozir chiqish", kiosk_done_more: "Yana test topshirish", kiosk_session_over: "Seans tugadi — qayta kiring",
     test_rules_title: "Test qoidalari", test_rule_own: "O'zing yech — test nimani bilishingni ko'rsatadi.", test_rule_copy: "Test paytida matnni nusxalash va qo'yish mumkin emas.", test_rule_away: "Ilovadan chiqsang (tarjimon, brauzer, boshqa ilova) — o'qituvchi buni ko'radi.", test_rule_keyboard: "Klaviatura takliflari va avtotuzatishni o'chirib, so'zlarni o'zing yozganing ma'qul — avtotuzatish javobni buzishi mumkin.", test_rules_ok: "Tushunarli, boshlash",
     test_away_warn: "Testdan chiqding (marta: {n}). O'qituvchi buni ko'radi.", test_paste_blocked: "Test paytida matn qo'yish mumkin emas", test_copy_blocked: "Test paytida matnni nusxalash mumkin emas",
     test_restudy_plan: "O'qituvchi bilan takroriy dars: {d}", test_restudy_note: "Takrorlash: {n}", test_extra_attempt: "O'qituvchi yana bitta urinish berdi",
@@ -4513,7 +4573,274 @@ function tabsFor(t) {
   ];
 }
 
+/* ============================ Компьютерный класс: тесты на компьютере ============================
+   Тот же адрес приложения + «?exam» в конце (например, https://адрес-приложения/?exam).
+   Только тесты: вход по логину (номер телефона) и паролю из сообщения центра → тесты по всем предметам
+   ученика → тест во весь экран → выход. Компьютер общий, поэтому:
+     • вход нигде не сохраняется — только в памяти открытой страницы (обновил страницу — войди заново,
+       начатый тест продолжится с того же места);
+     • браузер не предлагает запомнить пароль;
+     • 15 минут без действий — выход сам (за минуту до этого — предупреждение);
+     • после сдачи теста — «Выйти сейчас / Сдать ещё тест», через 60 секунд выход сам. */
+const KIOSK_IDLE_MS = 15 * 60 * 1000;
+const KIOSK_WARN_MS = 60 * 1000;
+const KIOSK_REFRESH_MS = 60 * 1000;
+function isExamMode() {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    return q.has("exam") || q.has("class") || /^#?exam$/i.test(window.location.hash || "") || /\/exam\/?$/i.test(window.location.pathname || "");
+  } catch { return false; }
+}
+
+function ExamKiosk() {
+  const [lang, setLang] = useState(() => { try { return localStorage.getItem("gu_lang") || "ru"; } catch { return "ru"; } });
+  const t = (key, vars) => translate(lang, key, vars);
+  const changeLang = (l) => { setLang(l); try { localStorage.setItem("gu_lang", l); } catch {} };
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [creds, setCreds] = useState(null); // { phone, password } — только в памяти страницы
+  const [students, setStudents] = useState([]);
+  const [activeId, setActiveId] = useState(null);
+  const [loginError, setLoginError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [idleLeft, setIdleLeft] = useState(null);   // секунд до выхода по бездействию
+  const [finishLeft, setFinishLeft] = useState(null); // секунд до выхода после сдачи теста
+  const lastActRef = useRef(Date.now());
+  const credsRef = useRef(null);
+  credsRef.current = creds;
+  // Пароль скрываем точками без поля type="password" — тогда браузер не предлагает его сохранить.
+  const maskByCss = useMemo(() => { try { return !!(window.CSS && CSS.supports && CSS.supports("-webkit-text-security", "disc")); } catch { return false; } }, []);
+  const student = students.find((s) => s.id === activeId) || null;
+
+  const logout = () => {
+    credsRef.current = null;
+    setCreds(null); setStudents([]); setActiveId(null);
+    setPhone(""); setPassword(""); setShowPass(false);
+    setIdleLeft(null); setFinishLeft(null); setLoginError("");
+    try { window.scrollTo(0, 0); } catch {}
+  };
+  const loginErrorText = (data) => (data && data.loginReason && LOGIN_REASON_KEYS[data.loginReason] ? t(LOGIN_REASON_KEYS[data.loginReason]) : (data && data.loginError) || t("login_error_generic"));
+  const doLogin = async () => {
+    if (loading) return;
+    const p = phone.trim(), pw = password.trim();
+    if (p.replace(/[^0-9]/g, "").length < 12 || !pw) { setLoginError(t("kiosk_fill")); return; }
+    setLoading(true); setLoginError("");
+    const res = await miniAppRequest(null, p, pw, { login: true, exam: true });
+    setLoading(false);
+    if (res?.error) { setLoginError(res.error); return; }
+    if (!res?.linked || !(res.students || []).length) { setLoginError(loginErrorText(res)); return; }
+    setPassword(""); setShowPass(false);
+    setCreds({ phone: p, password: pw });
+    setStudents(res.students);
+    setActiveId(res.students.length === 1 ? res.students[0].id : null);
+    lastActRef.current = Date.now();
+  };
+  // Запросы тестов — с логином и паролем из памяти страницы; свежие данные ученика сразу применяем.
+  const api = async (extra, timeoutMs) => {
+    const c = credsRef.current;
+    if (!c) return { error: t("kiosk_session_over") };
+    const res = await miniAppRequest(null, c.phone, c.password, extra, timeoutMs);
+    if (!credsRef.current) return { error: t("kiosk_session_over") };
+    if (res?.linked === false) return { error: t("identity_error") };
+    if (res?.students) setStudents(res.students);
+    return res;
+  };
+  const refresh = async () => {
+    if (refreshing || !credsRef.current) return;
+    setRefreshing(true);
+    try { await api({}); } finally { setRefreshing(false); }
+  };
+  // Раз в минуту — свежий список (учитель открыл тест или отметил повторное занятие).
+  useEffect(() => {
+    if (!creds) return;
+    const id = setInterval(() => { if (document.visibilityState === "visible") api({}); }, KIOSK_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [creds]);
+  // Бездействие: любое движение мыши, клавиша, прокрутка — «ученик здесь».
+  useEffect(() => {
+    if (!creds) return;
+    lastActRef.current = Date.now();
+    const bump = () => { lastActRef.current = Date.now(); };
+    const evs = ["mousemove", "mousedown", "keydown", "wheel", "touchstart", "scroll", "input"];
+    evs.forEach((e) => window.addEventListener(e, bump, true));
+    const id = setInterval(() => {
+      const idle = Date.now() - lastActRef.current;
+      if (idle >= KIOSK_IDLE_MS) { logout(); return; }
+      setIdleLeft(idle >= KIOSK_IDLE_MS - KIOSK_WARN_MS ? Math.max(1, Math.ceil((KIOSK_IDLE_MS - idle) / 1000)) : null);
+    }, 1000);
+    return () => { evs.forEach((e) => window.removeEventListener(e, bump, true)); clearInterval(id); };
+  }, [creds]);
+  // После сдачи теста — выход через 60 секунд, если ученик не выбрал «Сдать ещё тест».
+  useEffect(() => {
+    if (finishLeft === null) return;
+    if (finishLeft <= 0) { logout(); return; }
+    const id = setTimeout(() => setFinishLeft((x) => (x === null ? null : x - 1)), 1000);
+    return () => clearTimeout(id);
+  }, [finishLeft]);
+
+  const langSwitch = (
+    <div className="flex items-center gap-0.5 p-1 rounded-full" style={{ background: "var(--surface-alt)" }}>
+      {["ru", "en", "uz"].map((l) => (
+        <button key={l} onClick={() => changeLang(l)} className="h-8 px-2.5 rounded-full text-[12px] font-extrabold" style={{ background: lang === l ? "var(--surface)" : "transparent", boxShadow: lang === l ? "0 1px 4px rgba(0,0,0,0.12)" : "none" }}>
+          {l.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+  const shell = (children) => (
+    <div className="theme-light min-h-screen" data-kiosk style={{ background: PAPER, color: INK }}>
+      <style>{FONT_IMPORT}</style>
+      <style>{THEME_VARS}</style>
+      {children}
+    </div>
+  );
+
+  // ---------- Вход ----------
+  if (!creds) {
+    return shell(
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="w-full max-w-[440px]">
+          <div className="flex justify-end mb-4">{langSwitch}</div>
+          <div className="rounded-[28px] p-8" style={{ background: "var(--surface)", boxShadow: "0 10px 40px rgba(26,26,23,0.08)" }}>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-[20px] font-extrabold shrink-0" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>GU</div>
+              <div>
+                <h1 className="text-[22px] font-extrabold leading-tight">{t("kiosk_title")}</h1>
+                <p className="text-[13.5px] mt-0.5" style={{ color: "var(--ink-sub)" }}>{t("kiosk_sub")}</p>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[13px] font-semibold block mb-1.5" style={{ color: "var(--ink-2)" }}>{t("kiosk_login")}</label>
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 px-4 py-3.5 rounded-2xl text-[16px] font-semibold" style={{ background: "var(--surface-alt)" }}>+998</span>
+                  <input
+                    data-kiosk-login
+                    inputMode="numeric"
+                    value={formatUzPhone((phone || "").replace(/[^0-9]/g, "").replace(/^998/, "").slice(0, 9))}
+                    onChange={(e) => { const d = e.target.value.replace(/[^0-9]/g, ""); setPhone("+998 " + formatUzPhone(d.length > 9 ? d.slice(-9) : d)); setLoginError(""); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") document.querySelector("[data-kiosk-password]")?.focus(); }}
+                    autoComplete="off" autoFocus placeholder="90 123 45 67"
+                    className="w-full text-[17px] px-4 py-3.5 rounded-2xl outline-none" style={{ border: `1.5px solid ${LINE}`, background: PAPER, color: INK }}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[13px] font-semibold block mb-1.5" style={{ color: "var(--ink-2)" }}>{t("kiosk_password")}</label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    data-kiosk-password
+                    type={maskByCss || showPass ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => { setPassword(e.target.value); setLoginError(""); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") doLogin(); }}
+                    autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} name="gu-exam-code"
+                    className="w-full text-[17px] px-4 py-3.5 rounded-2xl outline-none"
+                    style={{ border: `1.5px solid ${LINE}`, background: PAPER, color: INK, paddingRight: 54, WebkitTextSecurity: maskByCss && !showPass ? "disc" : "none", fontFamily: showPass ? "ui-monospace, Menlo, monospace" : undefined }}
+                  />
+                  <button type="button" onClick={() => setShowPass((v) => !v)} aria-label={showPass ? t("login_hide_password") : t("login_show_password")}
+                    className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)" }}>
+                    {showPass ? <EyeOff size={19} /> : <Eye size={19} />}
+                  </button>
+                </div>
+              </div>
+              {loginError && <p className="text-[13px] font-medium" style={{ color: RED_D }} data-kiosk-error>{loginError}</p>}
+              <button onClick={doLogin} disabled={loading} className="w-full text-[16px] font-bold py-4 rounded-2xl text-white flex items-center justify-center gap-2" style={{ background: RED, opacity: loading ? 0.7 : 1 }}>
+                {loading && <Loader2 size={18} className="animate-spin" />}{t("kiosk_enter")}
+              </button>
+            </div>
+          </div>
+          <p className="text-[12.5px] mt-4 text-center px-4 leading-relaxed" style={{ color: "var(--ink-sub)" }}><Lock size={12} className="inline -mt-0.5 mr-1" />{t("kiosk_shared")}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- Шапка ----------
+  const header = (
+    <header className="sticky top-0 z-30" style={{ background: "var(--surface)", borderBottom: "1px solid var(--line)" }}>
+      <div className="max-w-6xl mx-auto px-6 h-16 flex items-center gap-4">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-[14px] font-extrabold shrink-0" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>GU</div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[15px] font-extrabold leading-tight truncate">{student ? student.name : t("kiosk_title")}</div>
+          <div className="text-[12px] truncate" style={{ color: "var(--ink-sub)" }}>{student ? (student.groups || []).map((g) => g.course || g.name).join(" · ") : t("kiosk_title")}</div>
+        </div>
+        {students.length > 1 && student && <button onClick={() => setActiveId(null)} className="text-[13px] font-semibold px-3.5 py-2 rounded-full" style={{ background: "var(--surface-alt)" }}>{t("kiosk_switch")}</button>}
+        <button onClick={refresh} className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "var(--surface-alt)" }} aria-label={t("kiosk_refresh")} title={t("kiosk_refresh")}>
+          <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
+        </button>
+        {langSwitch}
+        <button onClick={logout} data-kiosk-logout className="text-[14px] font-bold px-5 py-2.5 rounded-full text-white flex items-center gap-2" style={{ background: RED }}><LogOut size={16} />{t("kiosk_logout")}</button>
+      </div>
+    </header>
+  );
+
+  return shell(
+    <>
+      {header}
+      <main className="max-w-6xl mx-auto px-6 py-8">
+        {!student ? (
+          <div className="max-w-md mx-auto">
+            <h1 className="text-[24px] font-extrabold mb-4">{t("kiosk_who")}</h1>
+            <div className="space-y-2.5">
+              {students.map((s) => (
+                <button key={s.id} onClick={() => setActiveId(s.id)} className="w-full text-left rounded-[20px] px-5 py-4 flex items-center gap-3" style={{ background: "var(--surface)", boxShadow: "0 4px 16px rgba(26,26,23,0.06)" }}>
+                  <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-extrabold shrink-0" style={{ background: `linear-gradient(135deg, ${RED}, ${RED_D})` }}>{initials(s.name)}</div>
+                  <div className="min-w-0 flex-1"><div className="text-[16px] font-bold">{s.name}</div><div className="text-[12.5px]" style={{ color: "var(--ink-sub)" }}>{(s.groups || []).map((g) => g.course || g.name).join(" · ")}</div></div>
+                  <ChevronRight size={18} style={{ color: "var(--ink-3)" }} />
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="mb-6">
+              <h1 className="text-[26px] font-extrabold leading-tight">{t("kiosk_hello", { name: String(student.name || "").split(" ")[0] })}</h1>
+              <p className="text-[14px] mt-1" style={{ color: "var(--ink-sub)" }}>{t("kiosk_hint")}</p>
+            </div>
+            <TestsScreen key={student.id} student={student} t={t} lang={lang} api={api} desktop onResultClosed={() => setFinishLeft(60)} />
+          </>
+        )}
+        <p className="text-[12.5px] mt-10 text-center" style={{ color: "var(--ink-3)" }}><Lock size={12} className="inline -mt-0.5 mr-1" />{t("kiosk_shared")}</p>
+      </main>
+      {finishLeft !== null && idleLeft === null && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6" style={{ background: "rgba(0,0,0,0.5)" }} data-kiosk-finish>
+          <div className="anim-pop w-full max-w-md rounded-[28px] p-7 text-center" style={{ background: "var(--surface)" }}>
+            <div className="w-14 h-14 rounded-full mx-auto flex items-center justify-center" style={{ background: "var(--soft-green-bg)", color: GREEN_D }}><CheckCircle2 size={28} /></div>
+            <div className="text-[21px] font-extrabold mt-3">{t("kiosk_done_title")}</div>
+            <p className="text-[14px] mt-2 leading-relaxed" style={{ color: "var(--ink-2)" }}>{t("kiosk_done_text", { n: finishLeft })}</p>
+            <div className="flex gap-2.5 mt-6">
+              <button onClick={() => setFinishLeft(null)} className="flex-1 py-3.5 rounded-2xl text-[15px] font-semibold" style={{ background: "var(--surface-alt)" }}>{t("kiosk_done_more")}</button>
+              <button onClick={logout} className="flex-1 py-3.5 rounded-2xl text-[15px] font-bold text-white" style={{ background: RED }}>{t("kiosk_done_out")}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {idleLeft !== null && (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center p-6" style={{ background: "rgba(0,0,0,0.55)" }} data-kiosk-idle>
+          <div className="anim-pop w-full max-w-md rounded-[28px] p-7 text-center" style={{ background: "var(--surface)" }}>
+            <div className="text-[21px] font-extrabold">{t("kiosk_idle_title")}</div>
+            <p className="text-[14px] mt-2" style={{ color: "var(--ink-2)" }}>{t("kiosk_idle_text", { n: idleLeft })}</p>
+            <div className="flex gap-2.5 mt-6">
+              <button onClick={logout} className="flex-1 py-3.5 rounded-2xl text-[15px] font-semibold" style={{ background: "var(--surface-alt)" }}>{t("kiosk_logout")}</button>
+              <button onClick={() => { lastActRef.current = Date.now(); setIdleLeft(null); }} className="flex-1 py-3.5 rounded-2xl text-[15px] font-bold text-white" style={{ background: BLUE }}>{t("kiosk_idle_stay")}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Приложение ученика. С «?exam» в адресе — компьютерный класс (только тесты, вход по логину и паролю).
 export default function ParentApp() {
+  const exam = useMemo(() => isExamMode(), []);
+  return exam ? <ExamKiosk /> : <StudentApp />;
+}
+
+function StudentApp() {
   const [phase, setPhase] = useState("loading");
   const [errorMsg, setErrorMsg] = useState("");
   const [students, setStudents] = useState([]);
