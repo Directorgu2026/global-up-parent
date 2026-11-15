@@ -65,7 +65,7 @@ const {
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v36";
+const APP_VERSION = "v38";
 const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
 // Ссылка из задания — открываем только http(s). «javascript:…» и подобное не превращаем в ссылку:
 // иначе по нажатию выполнился бы чужой код. Не похоже на адрес сайта — показываем просто текстом.
@@ -459,6 +459,24 @@ function trendArrow(log) {
   return "same";
 }
 
+// v37: оценки за тесты — в дневник. Новый сервер (mini-app-data v30) присылает testGrades; со старым считаем
+// их прямо из итогов тестов (по лучшей завершённой попытке, как на сервере).
+function testGradesOf(student) {
+  if (Array.isArray(student?.testGrades)) return student.testGrades;
+  return (student?.tests || []).map((x) => {
+    const done = (x.attempts || []).filter((a) => !a.writingPending && Number.isFinite(Number(a.pct)));
+    if (!done.length) return null;
+    const best = done.reduce((b, a) => (!b || Number(a.pct) > Number(b.pct) ? a : b), null);
+    return { id: `${x.groupId}:${x.testId}`, title: x.title, value: testGradeFromPct(Number(best.pct)), pct: Number(best.pct), date: best.submittedAt, pending: !["passed", "failed_final"].includes(x.status) };
+  }).filter(Boolean).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+// Оценки вне уроков (от директора и за тесты) — без повторов: оценка за тест считается один раз.
+function extraGrades(student) {
+  const general = student?.generalGrades || [];
+  if (Array.isArray(student?.testGrades)) return [...general.filter((g) => g.kind !== "test"), ...student.testGrades];
+  return general;
+}
+
 function ProgressCard({ log, generalGrades = [], materials = [], homework = [], coins = 0, t }) {
   const total = log.length;
   const present = log.filter((r) => r.present).length;
@@ -475,7 +493,7 @@ function ProgressCard({ log, generalGrades = [], materials = [], homework = [], 
   // Сколько заданий из выданных хотя бы раз были сданы (не важно, проверены уже или нет).
   // Считаем ЗАКРЫТЫЕ ДЗ (сдано и, если был мини-тест, тест сдан). Для старых записей без поля closed — как раньше, по факту сдачи.
   const submittedMaterialIds = new Set(homework.filter((h) => h.closed !== false).map((h) => h.materialId).filter(Boolean));
-  const issued = materials.filter((m) => !m.archived);
+  const issued = materials.filter((m) => !m.archived && !m.self); // v38: работы, сданные без задания учителя, — не «выданные»
   const homeworkPct = issued.length ? Math.round((issued.filter((m) => submittedMaterialIds.has(m.id)).length / issued.length) * 100) : null;
 
   // Простой средний показатель: посещаемость + сданные ДЗ + оценки, без сложных весов —
@@ -1185,8 +1203,12 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, onOpenLesson, 
   const handleSubmit = async () => {
     if (submitting) return;
     if (files.length === 0 && !note.trim()) return;
+    if (material.self && files.length === 0) return;
     setSubmitting(true);
-    const res = await onSubmitHomework({ groupId: material.groupId, materialId: material.id, note, fileList: files });
+    // v38: работу без задания учителя сдают заново по тому же юниту — ключ работы сервер считает сам.
+    const res = await onSubmitHomework(material.self
+      ? { groupId: material.groupId, materialId: null, selfUnit: material.selfUnit || { topic: material.text }, note, fileList: files }
+      : { groupId: material.groupId, materialId: material.id, note, fileList: files });
     setSubmitting(false);
     if (res.ok) {
       setExpanded(false);
@@ -1247,7 +1269,7 @@ function HomeworkSubmitBox({ material, student, onSubmitHomework, onOpenLesson, 
           )}
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("homework_note_placeholder")} rows={2} className="w-full text-[12.5px] px-3 py-2 rounded-xl outline-none" style={{ background: "var(--surface)", border: "1px solid var(--line)" }} />
           <div className="flex gap-2">
-            <button onClick={handleSubmit} disabled={submitting || (files.length === 0 && !note.trim())} className="flex-1 text-[12.5px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 text-white disabled:opacity-50" style={{ background: RED }}>
+            <button onClick={handleSubmit} disabled={submitting || (files.length === 0 && !note.trim()) || (material.self && files.length === 0)} className="flex-1 text-[12.5px] font-semibold py-2 rounded-xl flex items-center justify-center gap-1.5 text-white disabled:opacity-50" style={{ background: RED }}>
               {submitting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}{t("homework_send")}
             </button>
             <button onClick={() => { setExpanded(false); setFiles([]); setNote(""); }} className="px-3.5 py-2 rounded-xl text-[12.5px] font-medium" style={{ background: "var(--surface)" }}>{t("cancel")}</button>
@@ -2981,7 +3003,7 @@ function TestResultView({ test, result, info, lang, t, onClose, onRetake, wide }
 }
 
 // Повторное занятие, которое назначил учитель: дата, время и что повторить.
-function RestudyPlanNote({ plan, t, lang }) {
+function RestudyPlanNote({ plan, t, lang, titleKey = "test_restudy_plan" }) {
   if (!plan || !plan.at) return null;
   const locale = LOCALE_OF[lang] || "ru-RU";
   const hasTime = String(plan.at).length > 10;
@@ -2990,7 +3012,7 @@ function RestudyPlanNote({ plan, t, lang }) {
   return (
     <div className="mt-2 p-2.5 rounded-[14px] text-[12.5px] leading-snug flex gap-2" style={{ background: "var(--soft-blue-bg)", color: "var(--soft-blue-fg)" }} data-restudy-plan>
       <CalendarClock size={16} className="shrink-0 mt-0.5" />
-      <div><b>{t("test_restudy_plan", { d: text })}</b>{plan.note && <div className="mt-0.5" style={{ color: "var(--ink-2)" }}>{t("test_restudy_note", { n: plan.note })}</div>}</div>
+      <div><b>{t(titleKey, { d: text })}</b>{plan.note && <div className="mt-0.5" style={{ color: "var(--ink-2)" }}>{t("test_restudy_note", { n: plan.note })}</div>}</div>
     </div>
   );
 }
@@ -3039,7 +3061,7 @@ function TestsScreen({ student, t, lang, api, desktop, onResultClosed }) {
     return res;
   };
 
-  const todo = tests.filter((x) => !x.closed && ["new", "in_progress", "retake", "needs_teacher", "checking"].includes(x.status));
+  const todo = tests.filter((x) => (!x.closed || (x.retakeOpen && x.canStart)) && ["new", "in_progress", "retake", "needs_teacher", "checking"].includes(x.status));
   const done = tests.filter((x) => !todo.includes(x));
   const renderCard = (x) => {
     const best = (x.attempts || []).reduce((b, a) => (!b || a.pct > b.pct ? a : b), null);
@@ -3063,8 +3085,10 @@ function TestsScreen({ student, t, lang, api, desktop, onResultClosed }) {
               {last && <Chip tone="neutral"><Clock size={11} />{fmtMinutes(last.activeSec, t)}</Chip>}
               {(x.attempts || []).length > 0 && x.status !== "passed" && <Chip tone="neutral">{t("test_attempts_used", { n: x.attempts.length, m: x.maxAttempts || 3 })}</Chip>}
             </div>
-            {x.restudyPlan ? <RestudyPlanNote plan={x.restudyPlan} t={t} lang={lang} />
+            {x.retakePlan ? <RestudyPlanNote plan={x.retakePlan} t={t} lang={lang} titleKey="test_retake_plan" />
+              : x.restudyPlan ? <RestudyPlanNote plan={x.restudyPlan} t={t} lang={lang} />
               : x.status === "needs_teacher" && !x.restudyDoneAt && <div className="text-[12px] mt-2" style={{ color: "var(--soft-red-fg)" }}>{t("test_wait_teacher")}</div>}
+            {x.retakeOpen && x.canStart && !x.retakePlan && <div className="text-[12px] mt-2 font-semibold" style={{ color: "var(--soft-blue-fg)" }} data-retake-open>🔁 {t("test_retake_open")}</div>}
             {x.extraAttempts > 0 && x.status === "retake" && x.canStart && <div className="text-[12px] mt-2 font-semibold" style={{ color: "var(--soft-green-fg)" }}>{t("test_extra_attempt")}</div>}
           </div>
         </div>
@@ -3157,7 +3181,7 @@ function HomeTab({ student, notifications = [], t, lang, onRequestService, onOpe
   const warned = (student.admission || []).filter((a) => !a.blocked && a.mode !== "off" && a.streak >= Math.max(1, a.limit - 1));
   const log = student.attendanceLog || [];
   const attPct = log.length ? Math.round((log.filter((r) => r.present).length / log.length) * 100) : null;
-  const grades = [...log.filter((r) => r.grade).map((r) => r.grade), ...(student.generalGrades || []).map((g) => g.value)];
+  const grades = [...log.filter((r) => r.grade).map((r) => r.grade), ...extraGrades(student).map((g) => g.value)];
   const avg = grades.length ? (grades.reduce((a, b) => a + b, 0) / grades.length).toFixed(1) : null;
   const hwSub = actionable.length ? t("hw_sub_todo") : inProgress ? t("hw_sub_checking") : (student.materials || []).length ? t("hw_sub_done") : null;
   const testsList = student.tests || [];
@@ -3316,7 +3340,177 @@ function checkedHomeworkGroups(student) {
   return out.sort((a, b) => new Date(b.latest) - new Date(a.latest));
 }
 
-function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
+// v38: ДЗ без задания учителя. Учитель не всегда добавляет задание в приложение — тогда ученик сдаёт работу сам:
+// выбирает предмет и юнит учебника своей группы (или пишет тему), прикладывает фото — работа уходит учителю
+// на проверку (и нейросети, если она включена). Повторная сдача того же юнита — новая попытка той же работы.
+function SelfHomeworkSheet({ student, api, onSubmitHomework, onClose, t }) {
+  const groups = student.groups || [];
+  const lastKey = `gu_selfhw_group_${student.id}`;
+  const [groupId, setGroupIdRaw] = useState(() => { let v = null; try { v = localStorage.getItem(lastKey); } catch {} return groups.some((g) => g.id === v) ? v : (groups[0]?.id || ""); });
+  const [unitsByGroup, setUnitsByGroup] = useState(null); // null — ещё грузятся
+  const [bookId, setBookId] = useState(null);
+  const [unit, setUnit] = useState(null); // { n, label, topic, bookId, book }
+  const [other, setOther] = useState(false); // «Другая тема» — своя тема вместо юнита
+  const [topic, setTopic] = useState("");
+  const [files, setFiles] = useState([]);
+  const [note, setNote] = useState("");
+  const [sending, setSending] = useState(false);
+  const photoInputRef = useRef(null);
+  const docInputRef = useRef(null);
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      let res = null;
+      try { res = await api({ hwUnits: { studentId: student.id } }); } catch { res = null; }
+      if (off) return;
+      // Не загрузилось (нет связи, старая версия сервера) — форма всё равно работает: номер юнита или своя тема.
+      setUnitsByGroup(res && Array.isArray(res.hwUnits) ? Object.fromEntries(res.hwUnits.map((x) => [x.groupId, x.books || []])) : {});
+    })();
+    return () => { off = true; };
+  }, [student.id]);
+  const setGroupId = (id) => { haptic("light"); setGroupIdRaw(id); setUnit(null); setOther(false); setTopic(""); setBookId(null); };
+  const group = groups.find((g) => g.id === groupId) || null;
+  const books = unitsByGroup ? (unitsByGroup[groupId] || []) : [];
+  const book = books.find((b) => b.book === bookId) || books[0] || null;
+  // Юниты, которые этот ученик уже сдавал сам, — с галочкой.
+  const doneUnits = new Set((student.materials || []).filter((m) => m.self && m.groupId === groupId && m.selfUnit && m.selfUnit.n).map((m) => `${m.selfUnit.bookId || "-"}:${m.selfUnit.n}`));
+  const pickUnit = (u) => { haptic("light"); setOther(false); setUnit(u); };
+  const chosen = other ? (topic.trim() ? { topic: topic.trim() } : null) : unit;
+  const canSend = !!group && !!chosen && files.length > 0 && !sending;
+  const addFiles = (picked) => setFiles((prev) => [...prev, ...Array.from(picked || [])].slice(0, 5));
+  const send = async () => {
+    if (!canSend) return;
+    setSending(true);
+    const res = await onSubmitHomework({ groupId, materialId: null, selfUnit: chosen, note, fileList: files });
+    setSending(false);
+    if (res && res.ok) { try { localStorage.setItem(lastKey, groupId); } catch {} onClose(); }
+  };
+  const aiOn = !!student.features?.aiHomework;
+  const box = { background: "var(--surface-soft)", border: "1px solid var(--line)" };
+  const label = (txt) => <div className="text-[12px] font-bold mb-1.5" style={{ color: "var(--ink-3)" }}>{txt}</div>;
+  return (
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-5" style={{ background: "rgba(0,0,0,0.45)", paddingTop: "var(--gu-safe-top, 0px)" }} onClick={onClose} data-self-hw>
+      <div className="anim-pop w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 max-h-[92vh] overflow-y-auto" style={{ background: "var(--surface)", paddingBottom: "calc(20px + var(--gu-safe-bottom, 0px))" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1.5">
+          <h2 className="text-[16px] font-bold flex items-center gap-2"><Camera size={19} style={{ color: RED }} />{t("hw_self_title")}</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: "var(--surface-alt)" }} aria-label={t("cancel")}><X size={15} /></button>
+        </div>
+        <p className="text-[12.5px] mb-4" style={{ color: "var(--ink-sub)" }}>{t("hw_self_desc")}</p>
+
+        {groups.length > 1 && (
+          <div className="mb-4">
+            {label(t("hw_self_subject"))}
+            <div className="flex flex-wrap gap-1.5">
+              {groups.map((g) => {
+                const active = g.id === groupId;
+                const [c1] = courseColor(g.course || g.name || "");
+                return (
+                  <button key={g.id} onClick={() => setGroupId(g.id)} className="text-[12.5px] font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5" style={{ background: active ? c1 : "var(--surface)", color: active ? "#fff" : "var(--ink-2)", border: `1px solid ${active ? "transparent" : "var(--line)"}` }} data-self-group={g.id}>
+                    {!active && <span className="w-1.5 h-1.5 rounded-full" style={{ background: c1 }} />}{g.course || g.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="mb-4">
+          {label(t("hw_self_unit"))}
+          {unitsByGroup === null ? (
+            <div className="text-[12.5px] py-3 flex items-center gap-2" style={{ color: "var(--ink-sub)" }}><Loader2 size={15} className="animate-spin" />{t("hw_self_loading")}</div>
+          ) : (
+            <>
+              {books.length > 1 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {books.map((b) => (
+                    <button key={b.book} onClick={() => { setBookId(b.book); setUnit(null); }} className="text-[11.5px] font-semibold px-2.5 py-1 rounded-full" style={{ background: book && book.book === b.book ? "var(--ink)" : "var(--surface)", color: book && book.book === b.book ? "var(--surface)" : "var(--ink-2)", border: "1px solid var(--line)" }}>{b.bookTitle}</button>
+                  ))}
+                </div>
+              )}
+              {book ? (
+                <>
+                  {books.length === 1 && <div className="text-[11.5px] mb-1.5 flex items-center gap-1" style={{ color: "var(--ink-sub)" }}><BookOpen size={12} />{book.bookTitle}</div>}
+                  <div className="grid grid-cols-2 gap-1.5 max-h-[34vh] overflow-y-auto pr-0.5" data-self-units>
+                    {book.units.map((u) => {
+                      const active = !other && unit && unit.n === u.n && unit.bookId === book.book;
+                      const done = doneUnits.has(`${book.book}:${u.n}`);
+                      return (
+                        <button key={u.n} onClick={() => pickUnit({ n: u.n, label: u.label, topic: u.topic || "", bookId: book.book, book: book.bookTitle })} className="text-left px-2.5 py-2 rounded-xl min-w-0" style={active ? { background: RED, color: "#fff", border: `1px solid ${RED}` } : box} data-self-unit={u.n}>
+                          <div className="text-[13px] font-bold flex items-center gap-1">{u.label}{done && <Check size={13} style={{ color: active ? "#fff" : GREEN_D }} />}</div>
+                          {u.topic && <div className="text-[11px] truncate" style={{ opacity: active ? 0.9 : 0.6 }}>{u.topic}</div>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-6 gap-1.5" data-self-units>
+                  {Array.from({ length: 30 }, (_, i) => i + 1).map((n) => {
+                    const active = !other && unit && unit.n === n && !unit.bookId;
+                    const done = doneUnits.has(`-:${n}`);
+                    return (
+                      <button key={n} onClick={() => pickUnit({ n, label: `Unit ${n}`, topic: "", bookId: null, book: "" })} className="py-2 rounded-xl text-[13.5px] font-bold relative" style={active ? { background: RED, color: "#fff", border: `1px solid ${RED}` } : box} data-self-unit={n}>
+                        {n}{done && <Check size={10} className="absolute top-1 right-1" style={{ color: active ? "#fff" : GREEN_D }} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <button onClick={() => { haptic("light"); setOther((v) => !v); setUnit(null); }} className="mt-2 text-[12.5px] font-semibold px-3 py-2 rounded-xl w-full text-left flex items-center gap-1.5" style={other ? { background: "var(--soft-red-bg)", color: RED, border: `1px solid ${RED}` } : box} data-self-other>
+                <Pencil size={13} />{t("hw_self_other")}
+              </button>
+              {other && (
+                <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder={t("hw_self_topic_ph")} maxLength={120} autoFocus className="mt-1.5 w-full text-[13px] px-3 py-2.5 rounded-xl outline-none" style={{ background: "var(--surface)", border: "1px solid var(--line)" }} data-self-topic />
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="mb-3">
+          {label(t("hw_self_photos"))}
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[12.5px] font-semibold py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer" style={{ background: "var(--surface)", border: "1px solid var(--line)" }}>
+              <ImageIcon size={15} />{t("homework_pick_photo")}
+              <input ref={photoInputRef} type="file" accept="image/*" multiple onChange={(e) => addFiles(e.target.files)} className="hidden" data-self-photo-input />
+            </label>
+            <label className="text-[12.5px] font-semibold py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer" style={{ background: "var(--surface)", border: "1px solid var(--line)" }}>
+              <Paperclip size={15} />{t("homework_pick_file")}
+              <input ref={docInputRef} type="file" accept=".pdf,.doc,.docx" multiple onChange={(e) => addFiles(e.target.files)} className="hidden" />
+            </label>
+          </div>
+          {files.length > 0 && (
+            <div className="space-y-1 mt-1.5">
+              {files.map((f, i) => (
+                <div key={i} className="flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg" style={{ background: "var(--surface-alt)" }}>
+                  <Paperclip size={11} className="shrink-0" /><span className="truncate flex-1">{f.name}</span>
+                  <button onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} className="shrink-0 opacity-60"><X size={13} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("homework_note_placeholder")} rows={2} className="w-full text-[12.5px] px-3 py-2 rounded-xl outline-none mb-3" style={{ background: "var(--surface)", border: "1px solid var(--line)" }} />
+
+        {group && (() => {
+          const [c1] = courseColor(group.course || group.name || "");
+          return (
+            <div className="text-[12px] px-2.5 py-2 rounded-lg font-semibold flex items-center gap-1.5 mb-2" style={{ background: `${c1}12`, color: "var(--ink)", border: `1px solid ${c1}40` }} data-submit-to>
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c1 }} />
+              <span className="min-w-0">{t("hw_submit_to", { c: [group.course, group.name, group.teacherName ? t("hw_teacher_short", { n: group.teacherName }) : ""].filter(Boolean).join(" · ") })}</span>
+            </div>
+          );
+        })()}
+        {aiOn && <div className="text-[11.5px] p-2 rounded-lg mb-2" style={{ background: "var(--soft-blue-bg, #DBEAFE)" }}><Bot size={13} className="inline -mt-0.5 mr-1" />{t("ai_submit_hint")}</div>}
+        <button onClick={send} disabled={!canSend} className="w-full py-3 rounded-full text-[14px] font-bold text-white flex items-center justify-center gap-2 transition-opacity" style={{ background: RED, opacity: canSend ? 1 : 0.4 }} data-self-send>
+          {sending ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}{t("homework_send")}
+        </button>
+        {!canSend && !sending && <div className="text-[11.5px] text-center mt-2" style={{ color: "var(--ink-sub)" }}>{!chosen ? t("hw_self_need_unit") : files.length === 0 ? t("hw_self_need_photo") : ""}</div>}
+      </div>
+    </div>
+  );
+}
+
+function HomeworkScreen({ student, t, lang, api, onSubmitHomework, onSubmitQuiz }) {
   // Открытый тест запоминаем: если ученик вышел из приложения посреди теста, при входе он откроется снова.
   const openKey = `gu_open_lesson_${student.id}`;
   const restoredRef = useRef(false); // true — тест открыт автоматически при входе, а не нажатием
@@ -3338,6 +3532,7 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
   const locale = LOCALE_OF[lang] || "ru-RU";
   const [showOld, setShowOld] = useState(false);
   const [openMaterialId, setOpenMaterialId] = useState(null);
+  const [selfOpen, setSelfOpen] = useState(false); // v38: «Сдать ДЗ без задания»
   // Вкладки: «Задания» и «Проверенные» — архив всех проверенных работ с разбором, доступен всегда.
   const hwTabKey = `gu_hw_tab_${student.id}`;
   const [hwTab, setHwTabRaw] = useState(() => { try { return localStorage.getItem(hwTabKey) || "tasks"; } catch { return "tasks"; } });
@@ -3364,7 +3559,9 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
     <PlainCard key={m.id} className="py-3.5">
       {multiCourse && hwGroupOf(student, m.groupId) && <div className="mb-1.5"><CourseTag group={hwGroupOf(student, m.groupId)} /></div>}
       <div className="text-[11.5px] font-semibold flex items-center gap-1.5" style={{ color: "var(--ink-3)" }}><Calendar size={12} />{new Date(m.date).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "long" })}</div>
+      {m.self && <div className="text-[11px] font-bold mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full" style={{ background: "var(--soft-red-bg)", color: "var(--soft-red-fg)" }} data-self-tag><Camera size={11} />{t("hw_self_tag")}</div>}
       {m.text && <div className="text-[14.5px] font-semibold mt-1 leading-snug" style={{ color: "var(--ink)" }}>{m.text}</div>}
+      {m.self && m.book && <div className="text-[11.5px] mt-0.5 flex items-center gap-1" style={{ color: "var(--ink-sub)" }}><BookOpen size={11} />{m.book}</div>}
       {m.link && (safeHref(m.link) ? <a href={safeHref(m.link)} target="_blank" rel="noreferrer" className="text-[12.5px] mt-1.5 font-semibold inline-flex items-center gap-1" style={{ color: BLUE }}><Link2 size={13} />{t("open_material")}</a> : <div className="text-[12.5px] mt-1.5 break-words" style={{ color: "var(--ink-3)" }}>{m.link}</div>)}
       <HomeworkSubmitBox material={m} student={student} onSubmitHomework={onSubmitHomework} onOpenLesson={(h) => setLessonSubId(h.id)} autoOpen={openMaterialId === m.id} onAutoOpened={() => setOpenMaterialId(null)} t={t} locale={locale} />
     </PlainCard>
@@ -3424,9 +3621,21 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
       </div>
     );
   }
+  const selfCta = (student.groups || []).length > 0 && (
+    <button onClick={() => { haptic("light"); setSelfOpen(true); }} className="w-full rounded-[20px] px-4 py-3 flex items-center gap-3 text-left active:scale-[0.99] transition-transform" style={{ background: "var(--surface)", border: "1.5px dashed var(--line)" }} data-self-hw-open>
+      <IconTile icon={Camera} bg="var(--soft-red-bg)" color={RED} size={38} iconSize={18} radius={12} />
+      <div className="min-w-0 flex-1">
+        <div className="text-[14px] font-bold" style={{ color: "var(--ink)" }}>{t("hw_self_title")}</div>
+        <div className="text-[11.5px] leading-snug" style={{ color: "var(--ink-sub)" }}>{t("hw_self_sub")}</div>
+      </div>
+      <ChevronRight size={18} style={{ color: "var(--ink-3)" }} className="shrink-0" />
+    </button>
+  );
+  const selfSheet = selfOpen && <SelfHomeworkSheet student={student} api={api} onSubmitHomework={onSubmitHomework} onClose={() => setSelfOpen(false)} t={t} />;
   return (
     <div className="space-y-3">
       {tabs}
+      {selfSheet}
       <AdmissionBanner student={student} t={t} locale={locale} />
       {tasks.length > 0 ? (
         <PlainCard>
@@ -3459,6 +3668,7 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
         </PlainCard>
       )}
       {lessonSub && lessonSub.aiLesson && <TopicReviewSheet key={lessonSub.id} h={lessonSub} t={t} onClose={() => setLessonSubId(null)} onSubmitQuiz={onSubmitQuiz} />}
+      {selfCta}
       {materials.length === 0 ? (
         <PlainCard><EmptyState text={t("no_homework")} icon={PartyPopper} /></PlainCard>
       ) : (
@@ -3480,6 +3690,31 @@ function HomeworkScreen({ student, t, lang, onSubmitHomework, onSubmitQuiz }) {
   );
 }
 
+// v37: «Оценки за тесты» — в дневнике ученика (экран «Мой прогресс»): тест, дата, процент, оценка.
+// Пока тест можно пересдать — помечено «можно пересдать», после пересдачи оценка обновится.
+function TestGradesCard({ student, t, lang }) {
+  const locale = LOCALE_OF[lang] || "ru-RU";
+  const list = testGradesOf(student);
+  if (!list.length) return null;
+  const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
+  return (
+    <div data-test-grades><PlainCard className="pb-2">
+      <CardTitle>{t("test_grades_title")}</CardTitle>
+      {list.map((g, i) => (
+        <div key={g.id} className="flex items-center gap-3 py-2.5" style={{ borderBottom: i === list.length - 1 ? "none" : "1px solid var(--line)" }} data-test-grade={g.value}>
+          <div className="w-9 h-9 rounded-full flex items-center justify-center text-[15px] font-extrabold text-white shrink-0" style={{ background: gradeColors[g.value] || "var(--ink-3)" }}>{g.value}</div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[13.5px] font-bold leading-tight truncate" style={{ color: "var(--ink)" }}>{g.title}</div>
+            <div className="text-[11.5px] mt-0.5" style={{ color: "var(--ink-sub)" }}>
+              {g.date ? ruDate(g.date, locale) : ""}{` · ${g.pct}%`}{g.pending ? ` · ${t("test_grade_can_retake")}` : ""}
+            </div>
+          </div>
+        </div>
+      ))}
+    </PlainCard></div>
+  );
+}
+
 // ------------------------------- Экран «Мой прогресс» -------------------------------
 function ProgressScreen({ student, t, lang }) {
   const locale = LOCALE_OF[lang] || "ru-RU";
@@ -3490,7 +3725,8 @@ function ProgressScreen({ student, t, lang }) {
   const gradeColors = { 1: BRICK, 2: "#EA580C", 3: GOLD, 4: "#65A30D", 5: GREEN_D };
   return (
     <div className="space-y-3">
-      <ProgressCard log={log} generalGrades={student.generalGrades || []} materials={student.materials || []} homework={student.homework || []} coins={student.coins} t={t} />
+      <ProgressCard log={log} generalGrades={extraGrades(student)} materials={student.materials || []} homework={student.homework || []} coins={student.coins} t={t} />
+      <TestGradesCard student={student} t={t} lang={lang} />
       <PlainCard className="pb-4">
         <CardTitle right={pct !== null && <Chip tone={pct >= 90 ? "green" : pct >= 80 ? "yellow" : "red"}>{pct}%</Chip>}>{t("attendance_grades")}</CardTitle>
         {recent.length === 0 ? <EmptyState text={t("no_attendance")} icon={Calendar} /> : (
@@ -3896,7 +4132,7 @@ function computeAchievements(student) {
   for (const r of log) { if (r.present) streak++; else break; }
   const homeworkDone = (student.homework || []).length;
   const homeworkReviewed = (student.homework || []).filter((h) => h.status === "reviewed" || h.status === "auto_accepted").length;
-  const goodGrades = log.filter((r) => r.grade >= 4).length + (student.generalGrades || []).filter((g) => g.value >= 4).length;
+  const goodGrades = log.filter((r) => r.grade >= 4).length + extraGrades(student).filter((g) => g.value >= 4).length;
 
   const list = [];
   if (streak >= 3) list.push({ icon: Flame, color: BRICK, labelKey: "ach_streak", n: streak });
@@ -4165,9 +4401,11 @@ const TRANSLATIONS = {
     kiosk_done_title: "Тест завершён", kiosk_done_text: "Если тестов больше нет — выйди, чтобы следующий ученик не попал в твой аккаунт. Выход сам через {n} с.", kiosk_done_out: "Выйти сейчас", kiosk_done_more: "Пройти ещё тест", kiosk_session_over: "Сеанс закончился — войдите снова",
     test_rules_title: "Правила теста", test_rule_own: "Решай сам — тест показывает, что ты уже знаешь.", test_rule_copy: "Копировать и вставлять текст во время теста нельзя.", test_rule_away: "Если выйдешь из приложения (переводчик, браузер, другое приложение) — учитель это увидит.", test_rule_keyboard: "Подсказки клавиатуры (Т9, автозамену) лучше выключить и писать слова самому — автозамена может испортить ответ.", test_rules_ok: "Понятно, начать",
     test_away_warn: "Ты выходил из теста (раз: {n}). Учитель это увидит.", test_paste_blocked: "Вставлять текст во время теста нельзя", test_copy_blocked: "Копировать текст во время теста нельзя",
+    test_retake_plan: "Пересдача: {d}", test_retake_open: "Учитель назначил пересдачу — можно пройти тест ещё раз", test_grades_title: "Оценки за тесты", test_grade_can_retake: "можно пересдать",
     test_restudy_plan: "Повторное занятие с учителем: {d}", test_restudy_note: "Повторить: {n}", test_extra_attempt: "Учитель дал ещё одну попытку",
     hw_redo_wrong_subject: "Похоже, это работа по другому предмету. Сдай её в задание нужного предмета, а сюда — работу по этому предмету.", hw_teacher_will_check: "Работу проверит учитель", hw_teacher_will_check_sub: "Нейросеть не смогла уверенно разобрать работу, поэтому её посмотрит учитель. Ничего делать не нужно.",
     hw_all_courses: "Все предметы", hw_submit_to: "Сдаёшь: {c}", hw_teacher_short: "учитель {n}",
+    hw_self_title: "Сдать ДЗ без задания", hw_self_sub: "Учитель не добавил задание? Выбери юнит и отправь фото работы", hw_self_desc: "Выбери предмет и юнит, сфотографируй работу — она уйдёт учителю на проверку.", hw_self_subject: "Предмет", hw_self_unit: "Юнит", hw_self_loading: "Загружаем юниты…", hw_self_other: "Другая тема — написать самому", hw_self_topic_ph: "Например: Present Simple, упр. 3–5", hw_self_photos: "Фото работы (до 5)", hw_self_need_unit: "Выбери юнит или напиши тему", hw_self_need_photo: "Добавь фото работы", hw_self_tag: "Сдано без задания учителя",
     test_retake_btn: "Пересдать тест (попытка {n} из {m})", test_no_retakes: "Пересдач больше нет", test_wait_teacher: "Ждём повторного занятия с учителем", test_attempts_left: "Осталось пересдач: {n}",
     lesson_now: "идёт сейчас", lesson_in_min: "через {m} мин", lesson_in_hm: "через {h} ч {m} мин", lesson_also: "Ещё сегодня",
     homework_short: "Домашка", progress_short: "Прогресс", service_support_lesson_short: "Суппорт-урок", service_topic_reexplain_short: "Объяснить тему", service_materials_only_short: "Материалы",
@@ -4304,8 +4542,10 @@ const TRANSLATIONS = {
     kiosk_done_title: "Test finished", kiosk_done_text: "If you have no more tests, sign out so the next student doesn't get into your account. Automatic sign-out in {n} s.", kiosk_done_out: "Sign out now", kiosk_done_more: "Take another test", kiosk_session_over: "Session ended — please sign in again",
     test_rules_title: "Test rules", test_rule_own: "Work on your own — the test shows what you already know.", test_rule_copy: "Copying and pasting text during the test is not allowed.", test_rule_away: "If you leave the app (translator, browser, another app), your teacher will see it.", test_rule_keyboard: "Better turn off keyboard suggestions and autocorrect and type words yourself — autocorrect can spoil an answer.", test_rules_ok: "Got it, start",
     test_away_warn: "You left the test (times: {n}). Your teacher will see it.", test_paste_blocked: "Pasting text during the test is not allowed", test_copy_blocked: "Copying text during the test is not allowed",
+    test_retake_plan: "Retake: {d}", test_retake_open: "Your teacher assigned a retake — you can take the test again", test_grades_title: "Test grades", test_grade_can_retake: "can retake",
     test_restudy_plan: "Review lesson with the teacher: {d}", test_restudy_note: "To review: {n}", test_extra_attempt: "Your teacher gave you one more attempt",
     hw_redo_wrong_subject: "This looks like work for another subject. Submit it to that subject's task, and send this subject's work here.", hw_teacher_will_check: "Your teacher will check this work", hw_teacher_will_check_sub: "The AI couldn't read the work reliably, so your teacher will look at it. Nothing to do.",
+    hw_self_title: "Submit homework without a task", hw_self_sub: "No task from your teacher? Pick a unit and send photos of your work", hw_self_desc: "Choose the subject and unit, take photos of your work — it goes to your teacher for checking.", hw_self_subject: "Subject", hw_self_unit: "Unit", hw_self_loading: "Loading units…", hw_self_other: "Other topic — type it yourself", hw_self_topic_ph: "For example: Present Simple, ex. 3–5", hw_self_photos: "Photos of your work (up to 5)", hw_self_need_unit: "Choose a unit or type a topic", hw_self_need_photo: "Add a photo of your work", hw_self_tag: "Submitted without a teacher's task",
     hw_all_courses: "All subjects", hw_submit_to: "Submitting to: {c}", hw_teacher_short: "teacher {n}",
     test_retake_btn: "Retake (attempt {n} of {m})", test_no_retakes: "No retakes left", test_wait_teacher: "Waiting for a review lesson with the teacher", test_attempts_left: "Retakes left: {n}",
     lesson_now: "in progress", lesson_in_min: "in {m} min", lesson_in_hm: "in {h} h {m} min", lesson_also: "Also today",
@@ -4443,7 +4683,9 @@ const TRANSLATIONS = {
     kiosk_done_title: "Test yakunlandi", kiosk_done_text: "Boshqa test bo'lmasa — chiq, keyingi o'quvchi hisobingga kirib qolmasin. {n} soniyadan keyin avtomatik chiqiladi.", kiosk_done_out: "Hozir chiqish", kiosk_done_more: "Yana test topshirish", kiosk_session_over: "Seans tugadi — qayta kiring",
     test_rules_title: "Test qoidalari", test_rule_own: "O'zing yech — test nimani bilishingni ko'rsatadi.", test_rule_copy: "Test paytida matnni nusxalash va qo'yish mumkin emas.", test_rule_away: "Ilovadan chiqsang (tarjimon, brauzer, boshqa ilova) — o'qituvchi buni ko'radi.", test_rule_keyboard: "Klaviatura takliflari va avtotuzatishni o'chirib, so'zlarni o'zing yozganing ma'qul — avtotuzatish javobni buzishi mumkin.", test_rules_ok: "Tushunarli, boshlash",
     test_away_warn: "Testdan chiqding (marta: {n}). O'qituvchi buni ko'radi.", test_paste_blocked: "Test paytida matn qo'yish mumkin emas", test_copy_blocked: "Test paytida matnni nusxalash mumkin emas",
+    test_retake_plan: "Qayta topshirish: {d}", test_retake_open: "O'qituvchi qayta topshirishni tayinladi — testni yana topshirish mumkin", test_grades_title: "Test baholari", test_grade_can_retake: "qayta topshirish mumkin",
     test_restudy_plan: "O'qituvchi bilan takroriy dars: {d}", test_restudy_note: "Takrorlash: {n}", test_extra_attempt: "O'qituvchi yana bitta urinish berdi",
+    hw_self_title: "Topshiriqsiz uy vazifasini topshirish", hw_self_sub: "O'qituvchi topshiriq qo'shmadimi? Unitni tanlang va ish rasmini yuboring", hw_self_desc: "Fan va unitni tanlang, ishingizni rasmga oling — u o'qituvchiga tekshirishga yuboriladi.", hw_self_subject: "Fan", hw_self_unit: "Unit", hw_self_loading: "Unitlar yuklanmoqda…", hw_self_other: "Boshqa mavzu — o'zim yozaman", hw_self_topic_ph: "Masalan: Present Simple, 3–5-mashqlar", hw_self_photos: "Ish rasmlari (5 tagacha)", hw_self_need_unit: "Unitni tanlang yoki mavzuni yozing", hw_self_need_photo: "Ish rasmini qo'shing", hw_self_tag: "O'qituvchi topshirig'isiz topshirildi",
     hw_redo_wrong_subject: "Bu boshqa fan bo'yicha ishga o'xshaydi. Uni kerakli fan vazifasiga topshir, bu yerga esa shu fan bo'yicha ishni yubor.", hw_teacher_will_check: "Ishni o'qituvchi tekshiradi", hw_teacher_will_check_sub: "Sun'iy intellekt ishni ishonchli o'qiy olmadi, shuning uchun uni o'qituvchi ko'radi. Hech narsa qilish shart emas.",
     hw_all_courses: "Barcha fanlar", hw_submit_to: "Topshirilmoqda: {c}", hw_teacher_short: "o'qituvchi {n}",
     test_retake_btn: "Qayta topshirish ({m} dan {n}-urinish)", test_no_retakes: "Boshqa urinish yo'q", test_wait_teacher: "O'qituvchi bilan qayta darsni kutamiz", test_attempts_left: "Qolgan urinishlar: {n}",
@@ -5155,14 +5397,14 @@ function StudentApp() {
     }
   };
 
-  const handleSubmitHomework = async ({ groupId, materialId, note, fileList }) => {
+  const handleSubmitHomework = async ({ groupId, materialId, selfUnit, note, fileList }) => {
     if (!student) return { ok: false };
     pendingMutationsRef.current++;
     try {
       const files = [];
       for (const f of fileList || []) files.push(await fileToUploadPayload(f));
       const data = await submitHomeworkRequest(initData, phone.trim() || null, password.trim() || null, {
-        studentId: student.id, groupId, materialId, note, files, lang,
+        studentId: student.id, groupId, materialId, note, files, lang, ...(selfUnit ? { selfUnit } : {}),
       });
       if (data.error) { haptic("error"); setToast(data.error); setTimeout(() => setToast(""), 3500); return { ok: false }; }
       if (!data.linked) { haptic("error"); setToast(t("identity_error")); setTimeout(() => setToast(""), 4000); return { ok: false }; }
@@ -5409,7 +5651,7 @@ function StudentApp() {
       ) : (
         <div className="relative px-4" style={{ paddingTop: tab === "home" && !screen ? 0 : 30 }}>
           {tab === "home" && !screen && <HomeTab student={student} notifications={student.notifications || []} t={t} lang={lang} onRequestService={handleRequestService} onOpenScreen={openScreen} />}
-          {tab === "home" && screen === "homework" && <HomeworkScreen student={student} t={t} lang={lang} onSubmitHomework={handleSubmitHomework} onSubmitQuiz={handleSubmitQuiz} />}
+          {tab === "home" && screen === "homework" && <HomeworkScreen student={student} t={t} lang={lang} api={testsApi} onSubmitHomework={handleSubmitHomework} onSubmitQuiz={handleSubmitQuiz} />}
           {tab === "home" && screen === "progress" && <ProgressScreen student={student} t={t} lang={lang} />}
           {tab === "home" && screen === "tests" && <TestsScreen student={student} t={t} lang={lang} api={testsApi} />}
           {tab === "home" && screen === "words" && <VocabScreen student={student} t={t} lang={lang} api={testsApi} />}
