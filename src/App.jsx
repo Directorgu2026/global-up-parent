@@ -65,8 +65,10 @@ const {
 
 /* ------------------------------ Настройка ------------------------------ */
 // Номер версии приложения — виден внизу вкладки «Профиль». По нему легко проверить, что обновление дошло.
-const APP_VERSION = "v38";
-const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data";
+const APP_VERSION = "v39";
+// v39: функция запускается в Сингапуре — там же, где база (ap-southeast-1). По умолчанию Supabase
+// запускает функцию в регионе, ближайшем к пользователю, и каждое из её 5–8 обращений к базе шло через полмира.
+const EDGE_FUNCTION_URL = "https://inswhfcwbybykwdthekg.supabase.co/functions/v1/mini-app-data?forceFunctionRegion=ap-southeast-1";
 // Ссылка из задания — открываем только http(s). «javascript:…» и подобное не превращаем в ссылку:
 // иначе по нажатию выполнился бы чужой код. Не похоже на адрес сайта — показываем просто текстом.
 function safeHref(url) {
